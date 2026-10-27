@@ -1,7 +1,7 @@
 """Call examples for ApiCompat.
 
 This script sends nothing, connects to nothing, and holds no key.
-It only prints the exact arguments a reviewer can paste into GenLayer
+It only prints the exact arguments that can be pasted into GenLayer
 Studio (or pass to the CLI / genlayer-js) after deploying the contract
 in a later step. See DEPLOY.md; deployment is explicitly out of scope
 for this development phase.

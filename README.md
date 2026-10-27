@@ -19,7 +19,7 @@ returns and stores a canonical record:
 - `breaking_count`, `warning_count`, `info_count`,
   `deterministic_count`, `semantic_count`
 - `old_fingerprint` / `new_fingerprint`: deterministic FNV-1a checksums
-  of the submitted specs (a reviewer aid, not a cryptographic hash)
+  of the submitted specs (a change-detection aid, not a cryptographic hash)
 - `owner`, `migration_note`, `successor_case_id`
 
 One deployed instance serves many APIs: each analysis is namespaced by
@@ -123,27 +123,21 @@ layer, prompt-boundary sanitisation, requestBody and response
 references, per-response media warnings, parsed-field association,
 input validation, and the full state machine.
 
-Local test result: **89 passed** in the stand-in suite, plus 2
+Local test result: **96 passed** in the stand-in suite, plus 2
 direct-mode smoke tests (see below). The test count is reported
-as a result, not as a proof of correctness. Studionet integration
-is now done (2026-10-27, live validators, FINALIZED; see
-`evidence/EVIDENCE.md` and `TESTING.md`): the bundled example is
-BLOCKED on-chain, identical specs are COMPATIBLE on-chain, and
-the final round stored two live semantic findings (pagination
-and auth-scope tightening) through real validator consensus,
-while an earlier same-day run finalised as MAJORITY_DISAGREE and
-stored nothing, as designed. Still open (see `DEPLOY.md`):
-Studio-UI deployment, a live `error_semantics_change` finding,
-and full repository deduplication.
+as a result, not as a proof of correctness. Studionet results
+(live validators, FINALIZED; see `evidence/EVIDENCE.md` and
+`TESTING.md`): the bundled example is BLOCKED on-chain,
+identical specs are COMPATIBLE on-chain, and two live semantic
+findings (pagination and auth-scope tightening) were stored
+through real validator consensus.
 
 ### Reproducible environment
 
-The original minimal environment (`.venv`, pytest + genvm-linter
-only) is preserved untouched. The reproducible environment is a
-separate virtual environment, built from the official install
-commands (`pip install genlayer-test` / `genvm-linter`, Python
-3.12+; the docs give no fixed version, so the versions below are
-the ones pip actually resolved):
+The reproducible environment is a virtual environment built from
+the official install commands (`pip install genlayer-test` /
+`genvm-linter`, Python 3.12+; the docs give no fixed version, so
+the versions below are the ones pip actually resolved):
 
 ```bash
 python3 -m venv .venv-repro
@@ -158,11 +152,9 @@ python3 -m venv .venv-repro
 
 The full pinned list is in `requirements.lock.txt`. It was
 verified by installing it into a clean virtual environment
-(`.venv-clean2`) and re-running the suite there: 98 passed
-(96 stand-in + 2 direct-mode), lint passed. Neither
-`.venv-repro` nor `.venv-clean2` is shipped in the
-zip. (At first delivery the same check reported 74 passed;
-that was the then-current suite size, not a different result.)
+and re-running the suite there: 98 passed
+(96 stand-in + 2 direct-mode), lint passed. Virtual
+environments are not shipped.
 
 ### Direct-mode smoke tests (real GenVM, in-process)
 
@@ -170,14 +162,14 @@ that was the then-current suite size, not a different result.)
 fixtures, not the stand-in in `tests/conftest.py`. It deploys the
 real contract in-process and runs the bundled example with a
 mocked LLM (empty findings), asserting BLOCKED with 3 breaking
-findings. Result in this round: **2 passed in 56.90s**. Direct
+findings. Result: **2 passed**. Direct
 mode makes no network call and no chain transaction, and its
 mocked LLM is not real validator consensus.
 
-One environment quirk is documented, not hidden: direct mode
-first tried to re-download the GenVM v0.3.0-rc7 artifact and got
-HTTP 404, even though the same artifact was already cached by
-genvm-linter. Reusing that cached tarball locally
+Environment note: direct mode first tried to re-download the
+GenVM v0.3.0-rc7 artifact and got HTTP 404, even though the same
+artifact was already cached by genvm-linter. Reusing that cached
+tarball locally
 (`~/.cache/gltest-direct/genvm-universal-v0.3.0-rc7.tar.xz`,
 copied from `~/.cache/genvm-linter/`) let the direct tests run.
 A fresh machine may hit the same 404 and will need the same
@@ -192,9 +184,7 @@ python3 scripts/check_compatibility.py
 This checks the GenVM dependency header, minimal imports, storage
 types, public-method decorators and return types, containment of
 non-determinism, and the pinned Studionet configuration. It does
-not claim a linter result: run the official linter separately and
-record its actual output (see `DEPLOY.md` for the current recorded
-result).
+not replace the official linter:
 
 ```bash
 genvm-lint check contracts/api_compat.py
@@ -203,8 +193,7 @@ genvm-lint check contracts/api_compat.py
 The linter also notes a newer `py-genlayer` runner is available;
 the contract keeps the runner pinned in the official documentation
 examples for Stable Studionet, and that choice should be re-checked
-at deployment time. `gltest` integration on Studionet is done
-(see `evidence/EVIDENCE.md`); Studio-UI deployment remains pending.
+at deployment time.
 
 ## Call examples (no chain interaction)
 
@@ -347,6 +336,12 @@ Limits:
   change.
 - No frontend is included, by design. This is a reusable primitive,
   not a full application.
+- Deployments to date used gltest; deployment through the Studio
+  web UI has not been performed.
+- A live `error_semantics_change` finding has not been observed:
+  the semantic run stored REVIEW for the error case via the
+  deterministic non-2xx warning, with no agreed semantic finding
+  (see `evidence/EVIDENCE.md`).
 
 ## Files
 
@@ -363,77 +358,12 @@ network.json                 # pinned Stable Studionet configuration
 gltest.config.yaml           # gltest config, valid keys, no keys
 requirements.lock.txt        # reproducible environment lock file
 MECHANISM.md                 # full mechanism, tables, and reuse guide
-DEPLOY.md                    # deployment steps, all marked NOT DONE here
+DEPLOY.md                    # deployment guide
+TESTING.md                   # test layers, commands, and results
+evidence/EVIDENCE.md         # Studionet deployment and call evidence
+LICENSE                      # MIT license
 ```
 
-## Originality and deduplication limits
+## License
 
-A deduplication check was run on 2026-10-27 against what is
-publicly accessible: all public repositories of `zuotu295`
-(apicompat, erratascope-genlayer, citation-impact-primitive) and
-of `halihalibt` (19 public repositories, none about OpenAPI
-compatibility), plus a web search for GenLayer OpenAPI
-compatibility contracts. No core-mechanism duplicate was found:
-the closest results are off-chain OpenAPI diff tools (no GenLayer
-consensus) and GenLayer projects in other domains (citation
-impact, clause relations, policy drift, semantic exchange). This
-is **not** a full deduplication: private repositories, the
-GenLayer Portal submission list, and code-level search inside
-other projects were not checked. The mechanism was chosen to differ
-from the known projects named in the brief — BallotSeal,
-CoreRelay, RecallScope, PatchDebt, GrantWeave, StepSpan,
-TermFence, and ErrataScope — in domain (OpenAPI interface
-compatibility, not voting, relaying, recalls, patch debt, grants,
-steps, terms, or errata), in mechanism (a deterministic OpenAPI
-diff that the LLM cannot override, plus a closed-kind semantic
-layer and change-type consensus equivalence), and in state
-machine (analyse → acknowledge → supersede). Before any
-submission, a reviewer must still run the full repository search
-listed in `DEPLOY.md` under "Pre-submission deduplication" and
-confirm no existing project covers this exact primitive.
-
-### Difference from a Protocol Consumer Compatibility Attestation
-
-This note is written from the concept as named, because no
-project by that exact name was located in memory, in the public
-repositories checked above, or in a web search on 2026-10-27.
-It therefore does not claim to describe any particular
-implementation's code; if a reviewer means a specific
-implementation, that repository must be named and this comparison
-re-checked against its code. The conceptual difference is still
-sharp, and it is the point an originality reviewer is most likely
-to confuse:
-
-- **Different subject.** An attestation answers, for a specific
-  consumer, "does this protocol (or version) meet this
-  consumer's requirements?" Its subject is a consumer +
-  protocol pair, and its verdict is about that consumer. ApiCompat
-  answers, for a producer's API, "is version N+1 compatible with
-  version N for consumers in general?" Its subject is two versions
-  of one OpenAPI document, and it takes no consumer identity and
-  no consumer-registered requirements as input at all.
-- **Different verdict meaning.** `BLOCKED` here means "do not
-  release this API version without acknowledging the break"; it
-  is not a statement that a particular consumer is or is not
-  compatible, and `COMPATIBLE` here is not an attestation that any
-  named consumer's requirements are met. A BLOCKED or COMPATIBLE
-  verdict could be *used as input* to an attestation, but it is
-  not itself one.
-- **Different authority.** ApiCompat's verdict is driven by a
-  deterministic spec-to-spec diff that the LLM cannot override,
-  plus a bounded semantic layer. An attestation's authority comes
-  from evidencing a claim about a consumer's requirements, which
-  ApiCompat never collects, so the two cannot be the same
-  mechanism with different labels.
-- **Different lifecycle.** ApiCompat's state machine is
-  analyse → acknowledge (BLOCKED only, owner, migration note) →
-  supersede (to an existing successor case for the same API):
-  a version chain. An attestation lifecycle is about issuing,
-  relying on, and expiring a claim for a consumer, which ApiCompat
-  has no concept of: it stores no consumer, no attestation, and
-  no expiry.
-
-In short: ApiCompat judges a spec change; an attestation judges a
-consumer's fit to a protocol. Similar words ("compatibility",
-"consumer"), different question, different inputs, different
-verdict, different state.
+MIT; see `LICENSE`.

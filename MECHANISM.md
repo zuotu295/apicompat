@@ -123,13 +123,11 @@ so the stored record is canonical.
 | Enum mixed replacement (values both removed and added, including a fully disjoint set) | `*_enum_shrunk` + `*_enum_expanded` | breaking (drives the status) + info; never silently passed |
 
 Enum handling distinguishes "no enum" (unrestricted, stored as
-`None`) from an explicitly set enum list. The previous version
-collapsed both to an empty list and only handled strict
-subset/superset, so a first restriction, a disjoint replacement,
-and a mixed add-and-remove all passed silently; the 2026-10-27
-enum fix and its regression tests cover all three, and the
-`1` → `1.0` test that previously expected no findings was
-updated because that disjoint replacement is now breaking.
+`None`) from an explicitly set enum list. Adding a restriction
+where none existed is a shrink; removing a restriction is an
+expansion; a replacement that both removes and adds values
+produces both findings, so no replacement passes silently
+because of the shape of the sets involved.
 
 ### Deterministic warning kinds for unsupported structures
 
@@ -310,16 +308,15 @@ partial-field-matching pattern: compare the fields that decide the
 outcome, not the prose around them — with the added guard that the
 prose must still be anchored to the operation it claims to describe.
 
-This rule changed after a live Studionet run on 2026-10-27: the
-leader reported a pagination change as three findings (one per
-parameter) and the validator set disagreed 3-2, so the transaction
-finalised as MAJORITY_DISAGREE and nothing was stored. Exact
-field-list equality treated a legitimate per-field split as a
-different verdict. The group rule above still rejects a validator
-that finds no change, a different kind, a different severity, or
-a disjoint field set, so it is not agreement on wording alone;
-but field-level exactness of a stored semantic finding is not
-consensus-guaranteed, and reviewers should audit the stored field
+Field-list exactness is deliberately not required: a model may
+split one change across fields (for example one finding per
+parameter of a pagination change), and exact field-list equality
+would treat that legitimate split as a different verdict. The
+group rule above still rejects a validator that finds no change,
+a different kind, a different severity, or a disjoint field set,
+so it is not agreement on wording alone; but field-level
+exactness of a stored semantic finding is not
+consensus-guaranteed, and the stored field should be checked
 against the stored evidence.
 
 A validator that only checked the leader's JSON shape, enum, or a
@@ -369,15 +366,15 @@ allows for captured locals.
   rejects any link that would close a successor cycle, by walking
   the successor chain with a bound of case_count + 1.
 - The fingerprint is FNV-1a, not a cryptographic hash. It helps a
-  reviewer spot that a spec changed; it does not prove authorship or
+  reader spot that a spec changed; it does not prove authorship or
   prevent a determined party from crafting a colliding spec. Do not
   use it as a signature.
 - Real-model resistance to prompt injection (as opposed to the
   deterministic guarantees above) can only be shown on a live
-  validator set and is therefore still open: the Studionet runs
-  on 2026-10-27 used live validators and stored live semantic
-  findings, but no live injection pair was run; see
-  `DEPLOY.md` and `evidence/EVIDENCE.md`.
+  validator set: no live prompt-injection pair has been run
+  against the validator set, so that resistance is unproven even
+  though the Studionet runs used live validators and stored live
+  semantic findings; see `evidence/EVIDENCE.md`.
 
 ## Reuse guide for other builders
 

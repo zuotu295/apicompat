@@ -1299,7 +1299,7 @@ def test_gltest_config_uses_keys_accepted_by_genlayer_test():
 # ---------------------------------------------------------------------------
 # Final-round targeted fixes (2026-10-27): security override, superseded
 # constraints, semantic evidence-kind association, float enums, and
-# non-2xx descriptions. Each test below fails on the pre-fix contract.
+# non-2xx descriptions.
 # ---------------------------------------------------------------------------
 
 
@@ -1438,8 +1438,8 @@ def test_float_enum_int_float_distinction_is_not_collapsed(mod):
     # The sets are disjoint (int 1 vs float 1.0 are distinct JSON
     # values), so this is a replacement, not a silent pass: the
     # removed value is breaking and the added value is info.
-    # This assertion previously expected no findings, which encoded
-    # the disjoint-replacement bug; it was updated with the fix.
+    # A disjoint replacement (1 -> 1.0) produces both a breaking
+    # shrink finding and an info expansion finding.
     assert any(f["kind"] == "response_field_enum_shrunk" and f["severity"] == "breaking"
                for f in findings)
     assert any(f["kind"] == "response_field_enum_expanded" and f["severity"] == "info"

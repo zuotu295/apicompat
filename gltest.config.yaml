@@ -3,7 +3,7 @@ networks:
   # accepted by genlayer-test 0.29.2 ("url" and "id").
   # No account, key, or deployment is
   # included here, and this file alone connects to no network.
-  # See DEPLOY.md for the pending Studio/gltest steps.
+  # See DEPLOY.md.
   # The default network is localnet, so a plain gltest run does
   # not target Studionet.
   default: localnet

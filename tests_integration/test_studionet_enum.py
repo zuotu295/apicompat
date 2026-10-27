@@ -4,14 +4,10 @@ Run ONLY with the reproducible environment, from the project root:
     .venv-repro/bin/gltest --network studionet tests_integration/test_studionet_enum.py -v -s
 
 One case, one deploy: a disjoint enum replacement on a response
-field. Under the pre-fix contract this case passed silently (the
-old _enum_diff only handled strict subset/superset and returned
-early on empty sides, so a replacement with no surviving value
-produced no finding). Under the fixed contract it must store
-BLOCKED with both a breaking enum_shrunk finding and an info
-enum_expanded finding. No mocked LLM is used; the semantic layer
-is not expected to add findings here, and the test does not
-require any. No Appeal is invoked.
+field must store BLOCKED with both a breaking enum_shrunk
+finding and an info enum_expanded finding. No mocked LLM is
+used; the semantic layer is not expected to add findings here,
+and the test does not require any. No Appeal is invoked.
 """
 
 import json

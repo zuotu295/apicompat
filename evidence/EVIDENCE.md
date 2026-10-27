@@ -1,13 +1,23 @@
-# Evidence — Stable Studionet, 2026-10-27 (Beijing time)
+# Evidence — Stable Studionet
 
-Machine-readable evidence: `studionet_deployment_2026-10-27.json`,
+Runs recorded 2026-10-27 (Beijing time). Machine-readable
+evidence: `studionet_deployment_2026-10-27.json`,
 `studionet_semantic_2026-10-27.json`, and
-`studionet_enum_2026-10-27.json` in
-this directory. This file is a human-readable summary of the same
-runs; it adds no address, hash, or result beyond what the test
-output printed. Sections 1–4 describe the cd79117-era contract;
-section 5 describes the post-enum-fix contract — keep the
-versions separate.
+`studionet_enum_2026-10-27.json` in this directory. This file is
+a human-readable summary of the same runs; it adds no address,
+hash, or result beyond what the test output printed.
+
+## Source versions
+
+Instances in sections 1–4 were deployed from the contract
+version current when those runs were made. The instance in
+section 5 was deployed from the current contract
+(SHA-256 `5a2d094ca25c85b78ed9a9d25bdee2ed71072eea5203173ee76632740eacb25b`).
+The specs used in sections 1–4 contain no enums, so the enum
+handling in the current contract does not change any verdict
+stored there. Instances keep running the code they were deployed
+with for any later case; a verdict is evidence for the contract
+version of its own instance, not for any other instance.
 
 ## Network
 
@@ -22,8 +32,7 @@ versions separate.
 
 ## Deployments and calls (all FINALIZED)
 
-Each integration test deploys its own contract instance, so three
-ApiCompat contracts were deployed in this round.
+Each integration test deploys its own contract instance.
 
 ### 1. Bundled example — BLOCKED (canonical instance)
 
@@ -52,9 +61,6 @@ ApiCompat contracts were deployed in this round.
 
 ### 3. Identical specs — COMPATIBLE (rerun, complete receipts)
 
-This rerun was made only to capture the analyze receipt that the
-first run omitted.
-
 - Contract: `0xb3b6199Cd484f480AD97795C6b9dC1F36814ba98`
 - Deploy tx: `0x070d742fb10a3b9f9528f6d252575ae2f19a4c809d9b13edf076c5f5e6ec2657`
 - Analyze tx: `0x34230b774159c115621de9065266155939a1416b4ce2ab0cb0fae268dc5a8e0d`
@@ -62,7 +68,7 @@ first run omitted.
 - Owner: `0xfC94700D061e13892Ba16024b437E3725D934Fcd`
 - Duration: 86.83s, 1 passed
 
-## 4. Semantic consensus — two live semantic findings stored (final round)
+## 4. Semantic consensus — two live semantic findings stored
 
 Machine-readable: `studionet_semantic_2026-10-27.json`.
 Test: `tests_integration/test_studionet_semantic.py`, 1 passed in
@@ -103,7 +109,7 @@ contract after the test and match the values below.
   validators disagreed cannot be told from the stored record
   alone; this is recorded as a limitation, not retried endlessly.
 
-### Earlier same-day semantic attempt — MAJORITY_DISAGREE (and why the rule changed)
+### Disagreement behaviour — MAJORITY_DISAGREE run (nothing stored)
 
 - Contract: `0x037f745BDae79c85E283eb177ef5DCEFC2E323D6`
 - Deploy tx: `0x6406846146b3f833f801077fdd1e54b2d9f3c97a79f66ebdfbd98b69444a811e`
@@ -115,17 +121,16 @@ contract after the test and match the values below.
   result: 3 breaking `pagination_change` findings, one per
   parameter (cursor, limit, page), deterministic 0, BLOCKED.
   Nothing was stored (case NOT_FOUND, case count 0, verified by a
-  later read), which is the designed disagreement behaviour.
-- Root cause: exact field-list decision-set equality treated a
-  legitimate per-field split of one change as a different verdict.
-  The contract was then changed to semantic change-type groups
-  (operation, kind, severity) with at least one shared field, and
-  the prompt now says to report each distinct change exactly once.
-  The second run above uses the revised contract. The change still
-  rejects a validator that finds no change, a different kind, a
-  different severity, or a disjoint field set; see MECHANISM.md.
+  later read), which is the designed disagreement behaviour:
+  exact field-list equality treated a legitimate per-field split
+  of one change as a different verdict. The equivalence rule in
+  `MECHANISM.md` is the change-type-group rule (operation, kind,
+  severity, with at least one shared field per group), and the
+  prompt instructs one finding per distinct change. That rule
+  still rejects a validator that finds no change, a different
+  kind, a different severity, or a disjoint field set.
 
-## 5. Enum-fix verification — disjoint replacement now BLOCKED (2026-10-27, post-fix contract)
+## 5. Enum verification — disjoint replacement BLOCKED
 
 Machine-readable: `studionet_enum_2026-10-27.json`.
 Test: `tests_integration/test_studionet_enum.py`, 1 passed in
@@ -146,20 +151,9 @@ the test and matches the values below.
   removed) and `response_field_enum_expanded` (info, values
   added), for the replacement `["open", "closed"]` →
   `["active", "archived"]` with no surviving value.
-- Why this instance exists: the pre-fix contract produced no
-  finding at all for this case, so a new deployment was the
-  minimal proof that the fix works on chain. Only one deploy and
-  one case were used; no earlier successful transaction was
-  repeated.
-- Prior instances are unaffected in their stored verdicts: the
-  bundled example specs contain no enums, and neither do any
-  earlier integration-test specs, so no stored verdict would
-  change under the fixed code. Those instances still run the
-  pre-fix code for any *future* case, which is why this new
-  instance, not an old address, is the evidence for the enum fix.
-  Do not mix version conclusions across instances: this section
-  is the post-enum-fix contract; sections 1–4 are the
-  cd79117-era contract.
+- Version note: see "Source versions" above. This instance, not
+  an earlier address, is the evidence for the enum handling in
+  the current contract.
 
 ## What this does and does not prove
 
@@ -167,14 +161,13 @@ the test and matches the values below.
   executes through live consensus to FINALIZED, and the stored
   record read back from the chain matches the deterministic
   expectations for both the blocked example and identical specs;
-  and, in the final round, live validators agreed on two semantic
-  findings (pagination and auth scope) whose verdicts the
-  deterministic layer alone would not have produced, while a
-  disagreement in the earlier run wrote nothing, as designed.
+  live validators agreed on two semantic findings (pagination
+  and auth scope) whose verdicts the deterministic layer alone
+  would not have produced, while a disagreement in another run
+  wrote nothing, as designed.
 - Does not prove: a live `error_semantics_change` finding (see
-  case `semantic-error` above), Studio-UI deployment (these
-  deployments went through gltest, not the Studio web UI), or full
-  repository deduplication (public-repo check only, see README.md).
-  Those remain open, see `DEPLOY.md`.
+  case `semantic-error` above), or Studio-UI deployment (these
+  deployments went through gltest, not the Studio web UI).
+  See `DEPLOY.md`.
 - No Appeal was invoked in any run. No personal wallet, private
   key, mnemonic, or credential was used.

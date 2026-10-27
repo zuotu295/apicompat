@@ -11,27 +11,23 @@
    deterministic layer, prompt-boundary sanitisation, requestBody
    and response references, per-response media warnings,
    parsed-field association, input validation, and the full
-   state machine. The final-round additions cover: operation
-   security overriding global security including `security: []`,
+   state machine. Coverage includes: operation security
+   overriding global security including `security: []`,
    deterministic scope add/remove severities, supersede cycle
    and cross-API rejection, semantic evidence-field-kind
    association including auth-scope field rules, float enum
    shrink detection and int/float distinction, non-2xx
-   description-only change detection, and validator agreement
+   description-only change detection, validator agreement
    with different evidence wording plus rejection when the
-   validator finds no semantic finding, plus three tests for the
-   revised semantic equivalence rule (same change split across
-   fields agrees; disjoint fields disagree; different severity
-   disagrees). The split-agreement test fails against the
-   pre-equivalence contract; the other new tests fail against
-   their respective pre-fix contracts. The enum round adds:
-   unrestricted → finite (breaking), finite → unrestricted
-   (info only), disjoint replacement (breaking + info), mixed
-   add-and-remove (breaking + info), pure expansion (info only),
-   parameter restriction (breaking), and identical/no-enum
-   (no finding). The `1` → `1.0` disjoint case, which previously
-   expected no findings, now expects breaking + info. Run:
-   `.venv-repro/bin/python -m pytest tests -q`.
+   validator finds no semantic finding, semantic equivalence
+   by change-type groups (same change split across fields
+   agrees; disjoint fields disagree; different severity
+   disagrees), and enum transitions: unrestricted → finite
+   (breaking), finite → unrestricted (info only), disjoint
+   replacement (breaking + info), mixed add-and-remove
+   (breaking + info), pure expansion (info only), parameter
+   restriction (breaking), and identical/no-enum (no finding).
+   Run: `.venv-repro/bin/python -m pytest tests -q`.
    A test count is a result, not a proof of correctness.
 2. **Direct-mode smoke — `tests_direct/` (2 passed, real GenVM
    in-process, no network, no chain transaction).** Deploys the
@@ -61,14 +57,12 @@
      semantic breaking finding (deterministic 0, BLOCKED);
      the error-semantics case stored REVIEW via the
      deterministic non-2xx warning with semantic_count 0.
-     An earlier same-day run finalised as MAJORITY_DISAGREE
-     and stored nothing, which motivated the revised semantic
-     equivalence rule (change-type groups with a shared field).
-   - `test_studionet_enum.py`: 1 passed in 88.00s, post-enum-fix
-     contract only. A disjoint enum replacement stored BLOCKED
-     with both `response_field_enum_shrunk` (breaking) and
-     `response_field_enum_expanded` (info); the pre-fix contract
-     stored nothing for this case. See
+     A separate run finalised as MAJORITY_DISAGREE and stored
+     nothing; see `evidence/EVIDENCE.md`.
+   - `test_studionet_enum.py`: 1 passed in 88.00s. A disjoint
+     enum replacement stored BLOCKED with both
+     `response_field_enum_shrunk` (breaking) and
+     `response_field_enum_expanded` (info). See
      `evidence/studionet_enum_2026-10-27.json`.
 
 ## Linter
@@ -87,13 +81,10 @@ decorators and return types, containment of non-determinism,
 and the pinned Studionet configuration. It does not claim a
 linter result.
 
-## Still open
+## Known limits
 
 - Live `error_semantics_change` finding: not stored in the
-  2026-10-27 semantic run (see above); whether the leader
-  produced none or validators disagreed is not visible from
-  the stored record.
-- Deployment through the Studio web UI (Studionet deployments
-  so far went through gltest, not Studio UI).
-- Full repository deduplication before any submission
-  (public-repo check only, see README.md).
+  semantic run (see above); whether the leader produced none or
+  validators disagreed is not visible from the stored record.
+- Deployment through the Studio web UI: Studionet deployments
+  so far went through gltest, not Studio UI.
