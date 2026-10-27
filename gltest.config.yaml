@@ -1,0 +1,18 @@
+networks:
+  # gltest integration configuration only, using the key names
+  # accepted by genlayer-test 0.29.2 ("url" and "id").
+  # No account, key, or deployment is
+  # included here, and this file alone connects to no network.
+  # See DEPLOY.md for the pending Studio/gltest steps.
+  # The default network is localnet, so a plain gltest run does
+  # not target Studionet.
+  default: localnet
+  localnet:
+    url: "http://localhost:4000/api"
+    id: 61127
+  studionet:
+    url: "https://studio.genlayer.com/api"
+    id: 61999
+paths:
+  contracts: "contracts"
+  artifacts: "artifacts"

@@ -1,0 +1,7 @@
+.venv/
+.venv-repro/
+.venv-clean/
+artifacts/
+__pycache__/
+.pytest_cache/
+*.pyc

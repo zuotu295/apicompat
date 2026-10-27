@@ -1,0 +1,81 @@
+# ApiCompat reproducible environment lock file.
+#
+# Generated from an actually installed environment, not from a guess:
+#   python3 -m venv .venv-repro
+#   .venv-repro/bin/pip install pytest genvm-linter genlayer-test
+# on 2026-10-27, Python 3.12.3, pip 24.0. The resolver chose
+# genlayer-test 0.29.2 and genlayer-py 0.16.3; the official docs
+# give the install commands (pip install genlayer-test /
+# genvm-linter, Python 3.12+) but no fixed version, so the versions
+# below are the ones pip actually resolved and that were then used
+# for the test and lint runs in this round.
+#
+# Reproduce it (clean environment):
+#   python3 -m venv .venv-clean
+#   .venv-clean/bin/pip install -r requirements.lock.txt
+#   .venv-clean/bin/python -m pytest tests -q
+#   .venv-clean/bin/genvm-lint check contracts/api_compat.py
+#
+# Notes:
+# - This lock file covers the local validation environment only.
+#   It does not deploy, connect to a network, or hold any key.
+# - The original minimal environment (.venv, pytest + genvm-linter
+#   only) is left untouched; .venv-repro is the new environment.
+# - Direct-mode tests in tests_direct/ also use this environment.
+#   They need a GenVM artifact (see README.md); a fresh download
+#   may fail if the release asset is unavailable, in which case
+#   the cached artifact used by genvm-linter can be reused locally.
+PyYAML==6.0.3
+Pygments==2.21.0
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+annotated-types==0.8.0
+attrs==26.1.0
+bitarray==3.12.3
+certifi==2026.10.23
+charset-normalizer==3.5.2
+ckzg==2.1.8
+click==8.5.0
+colorama==0.4.6
+cytoolz==1.2.0
+eth-account==0.14.0
+eth-hash==0.8.0
+eth-keyfile==0.10.0
+eth-keys==0.8.0
+eth-rlp==3.0.0
+eth-typing==6.0.0
+eth-utils==6.0.0
+eth_abi==6.0.0
+frozenlist==1.8.0
+genlayer-py==0.16.3
+genlayer-test==0.29.2
+genvm-linter==0.11.0
+hexbytes==2.0.0
+idna==3.20
+iniconfig==2.3.1
+multidict==7.2.1
+nodeenv==1.11.0
+numpy==2.5.4
+packaging==26.3
+parsimonious==0.10.0
+pluggy==1.7.0
+propcache==0.5.4
+py-ecc==8.0.0
+pycryptodome==3.24.1
+pydantic==2.14.1
+pydantic_core==2.50.1
+pyright==1.1.414
+pytest==9.1.1
+python-dotenv==1.2.4
+pyunormalize==18.0.0
+regex==2026.9.29
+requests==2.34.2
+rlp==5.0.0
+toolz==1.2.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.8.0
+web3==8.0.0
+websockets==17.3
+yarl==1.25.1
