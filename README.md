@@ -123,15 +123,18 @@ layer, prompt-boundary sanitisation, requestBody and response
 references, per-response media warnings, parsed-field association,
 input validation, and the full state machine.
 
-Local test result: **74 passed** in the stand-in suite, plus 2
+Local test result: **89 passed** in the stand-in suite, plus 2
 direct-mode smoke tests (see below). The test count is reported
 as a result, not as a proof of correctness. Studionet integration
 is now done (2026-10-27, live validators, FINALIZED; see
 `evidence/EVIDENCE.md` and `TESTING.md`): the bundled example is
-BLOCKED on-chain and identical specs are COMPATIBLE on-chain.
-Studio-UI deployment, real-model semantic behaviour, and
-validator agreement/disagreement via `run_validator()` remain
-open (see `DEPLOY.md`).
+BLOCKED on-chain, identical specs are COMPATIBLE on-chain, and
+the final round stored two live semantic findings (pagination
+and auth-scope tightening) through real validator consensus,
+while an earlier same-day run finalised as MAJORITY_DISAGREE and
+stored nothing, as designed. Still open (see `DEPLOY.md`):
+Studio-UI deployment, a live `error_semantics_change` finding,
+and full repository deduplication.
 
 ### Reproducible environment
 
@@ -348,7 +351,7 @@ Limits:
 ```
 contracts/api_compat.py      # single-file GenLayer contract (deployable)
 tests/conftest.py            # GenLayer stand-in + contract loader
-tests/test_api_compat.py     # 74 tests with real assertions
+tests/test_api_compat.py     # 89 tests with real assertions
 tests_direct/test_direct_smoke.py  # 2 direct-mode tests, real GenVM
 examples/old_spec.json       # bundled v1 example
 examples/new_spec.json       # bundled v2 example (BLOCKED pair)
