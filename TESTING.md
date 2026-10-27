@@ -2,7 +2,7 @@
 
 ## Layers
 
-1. **Stand-in suite — `tests/` (74 passed).** Loads
+1. **Stand-in suite — `tests/` (89 passed).** Loads
    `contracts/api_compat.py` itself behind a small GenLayer
    stand-in (`tests/conftest.py`), so it exercises the deployable
    file, not a copy of its logic. Covers the deterministic diff,
@@ -11,7 +11,21 @@
    deterministic layer, prompt-boundary sanitisation, requestBody
    and response references, per-response media warnings,
    parsed-field association, input validation, and the full
-   state machine. Run: `.venv-repro/bin/python -m pytest tests -q`.
+   state machine. The final-round additions cover: operation
+   security overriding global security including `security: []`,
+   deterministic scope add/remove severities, supersede cycle
+   and cross-API rejection, semantic evidence-field-kind
+   association including auth-scope field rules, float enum
+   shrink detection and int/float distinction, non-2xx
+   description-only change detection, and validator agreement
+   with different evidence wording plus rejection when the
+   validator finds no semantic finding, plus three tests for the
+   revised semantic equivalence rule (same change split across
+   fields agrees; disjoint fields disagree; different severity
+   disagrees). The split-agreement test fails against the
+   pre-equivalence contract; the other new tests fail against
+   their respective pre-fix contracts. Run:
+   `.venv-repro/bin/python -m pytest tests -q`.
    A test count is a result, not a proof of correctness.
 2. **Direct-mode smoke — `tests_direct/` (2 passed, real GenVM
    in-process, no network, no chain transaction).** Deploys the
@@ -28,10 +42,22 @@
    Each test deploys its own contract instance on Stable
    Studionet (61999) and calls it through the live validator
    set; no mocked LLM is used. Results are in
-   `evidence/EVIDENCE.md` and
-   `evidence/studionet_deployment_2026-10-27.json`. Do not run
+   `evidence/EVIDENCE.md`,
+   `evidence/studionet_deployment_2026-10-27.json`, and
+   `evidence/studionet_semantic_2026-10-27.json`. Do not run
    this directory against another network without reviewing it
    first, and never use it for Appeal.
+   - `test_studionet.py`: bundled example BLOCKED, identical
+     specs COMPATIBLE (twice), all FINALIZED, semantic_count 0
+     in all three runs.
+   - `test_studionet_semantic.py`: 1 passed in 220.60s.
+     Pagination and auth-scope cases each stored one live
+     semantic breaking finding (deterministic 0, BLOCKED);
+     the error-semantics case stored REVIEW via the
+     deterministic non-2xx warning with semantic_count 0.
+     An earlier same-day run finalised as MAJORITY_DISAGREE
+     and stored nothing, which motivated the revised semantic
+     equivalence rule (change-type groups with a shared field).
 
 ## Linter
 
@@ -51,11 +77,11 @@ linter result.
 
 ## Still open
 
-- Real-model semantic behaviour: semantic_count was 0 in all
-  three Studionet runs, so no live semantic finding was
-  exercised there.
-- Validator agreement/disagreement via `run_validator()` under
-  the real harness.
+- Live `error_semantics_change` finding: not stored in the
+  2026-10-27 semantic run (see above); whether the leader
+  produced none or validators disagreed is not visible from
+  the stored record.
 - Deployment through the Studio web UI (Studionet deployments
   so far went through gltest, not Studio UI).
-- Full repository deduplication before any submission.
+- Full repository deduplication before any submission
+  (public-repo check only, see README.md).

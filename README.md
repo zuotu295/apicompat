@@ -58,13 +58,18 @@ puts the decision on chain, but bounds the LLM:
    variants, and forged segment markers, and it never expands the
    spec text, so a spec at the size limit is not truncated.
 3. **Independent validator re-execution.** A validator re-runs the
-   leader function and must match the deterministic and semantic
-   *decision sets* exactly, plus the derived status. Evidence wording
-   is not required to be equal, because models phrase the same
-   decision differently, but the validator also checks that every
+   leader function and must match the deterministic decision set
+   exactly and the semantic change-type set (operation, kind,
+   severity, with at least one shared field per change type), plus
+   the derived status. Evidence wording and semantic finding
+   multiplicity are not required to be equal, because models phrase
+   the same decision differently and may split one change across
+   different fields, but the validator also checks that every
    semantic finding stored by the leader has operation-anchored
    evidence; a finding that fails that check is rejected even if its
-   decision key matches. Malformed LLM output is rejected (not agreed
+   change type matches. A validator that finds no change, a different
+   kind, a different severity, or a disjoint field set still
+   disagrees. Malformed LLM output is rejected (not agreed
    on), so a broken leader forces rotation instead of storing a broken
    result.
 4. **State only after consensus.** Storage writes happen in
@@ -78,7 +83,7 @@ analyze_case
   -> COMPATIBLE
   -> REVIEW
   -> BLOCKED --acknowledge_breaking (owner, migration note)--> ACKNOWLEDGED
-COMPATIBLE / REVIEW / ACKNOWLEDGED --mark_superseded (owner, existing successor)--> SUPERSEDED
+COMPATIBLE / REVIEW / ACKNOWLEDGED --mark_superseded (owner, existing successor, same api_name, no successor cycle)--> SUPERSEDED
 ```
 
 `BLOCKED` cannot jump straight to `SUPERSEDED`; it must be
@@ -245,11 +250,16 @@ Supported:
   and reference warnings, even after the first JSON schema is found.
 - Security scopes, for semantic-field association: a scope name is
   a valid semantic field only when it appears in the operation's
-  security (root or operation level).
+  effective security (an operation-level security list replaces
+  the global list; `security: []` means anonymous). Security scope
+  changes are also diffed deterministically: an added scope is
+  `security_scope_added` (breaking), a removed scope is
+  `security_scope_removed` (info).
 - Non-2xx responses, for change detection only: their presence,
-  media types, and JSON schemas are recorded, but they are not
-  diffed field by field. If a non-2xx response is added, removed,
-  or changed, the record gets a `unsupported_non_2xx_response`
+  media types, JSON schemas, and descriptions are recorded, but
+  they are not diffed field by field. If a non-2xx response is
+  added, removed, or changed, including a description-only change,
+  the record gets a `unsupported_non_2xx_response`
   warning and is at least REVIEW. Unchanged non-2xx responses
   produce no warning, so a COMPATIBLE status means the error
   surface did not change in any detected way.
@@ -301,14 +311,22 @@ Limits:
 - Semantic evidence must be a verbatim excerpt of at least 5
   characters from the same operation, and the field must resolve to
   a parsed parameter, request field, response field, security scope,
-  or referenced component for that operation. A correct semantic
-  observation quoted as a paraphrase, quoted from another operation,
-  or naming a field with no parsed association will be dropped;
+  or referenced component for that operation. The evidence must
+  also be about the claimed field and kind: evidence mentioning
+  only other parsed fields is rejected, and evidence mentioning no
+  parsed field is accepted only if it contains vocabulary for the
+  claimed kind; an `auth_scope_tightened` finding's field must be
+  a scope or `security`. A correct semantic observation quoted as
+  a paraphrase, quoted from another operation, or naming a field
+  with no parsed association will be dropped;
   this is a deliberate anti-hallucination trade-off.
+- Enum values are compared with their type: float, int, string,
+  and bool values are distinct, so shrinking a float enum is
+  detected and 1 vs 1.0 vs true are not collapsed.
 - Not diffed deterministically, and documented here rather than
   claimed: non-2xx response schemas (only their presence, media
-  types, and flattened JSON fields are compared, and a change
-  produces a REVIEW warning, not a field-level finding), parameter
+  types, flattened JSON fields, and descriptions are compared, and
+  a change produces a REVIEW warning, not a field-level finding), parameter
   `style` / `explode`, schema constraints other than type, format,
   enum, and nullable (such as `minimum`, `pattern`, or length
   bounds), schema `discriminator`, and `example` / `examples`
@@ -345,16 +363,26 @@ DEPLOY.md                    # deployment steps, all marked NOT DONE here
 
 ## Originality and deduplication limits
 
-This project was developed in this workspace only, without connecting
-to GitHub or any other repository. It is therefore **not** claimed
-to have completed a full repository deduplication. The mechanism was chosen to differ from the known
-projects named in the brief — BallotSeal, CoreRelay, RecallScope,
-PatchDebt, GrantWeave, StepSpan, TermFence, and ErrataScope — in
-domain (OpenAPI interface compatibility, not voting, relaying,
-recalls, patch debt, grants, steps, terms, or errata), in mechanism
-(a deterministic OpenAPI diff that the LLM cannot override, plus a
-closed-kind semantic layer and exact decision-set equivalence), and
-in state machine (analyse → acknowledge → supersede). Before any
+A deduplication check was run on 2026-10-27 against what is
+publicly accessible: all public repositories of `zuotu295`
+(apicompat, erratascope-genlayer, citation-impact-primitive) and
+of `halihalibt` (19 public repositories, none about OpenAPI
+compatibility), plus a web search for GenLayer OpenAPI
+compatibility contracts. No core-mechanism duplicate was found:
+the closest results are off-chain OpenAPI diff tools (no GenLayer
+consensus) and GenLayer projects in other domains (citation
+impact, clause relations, policy drift, semantic exchange). This
+is **not** a full deduplication: private repositories, the
+GenLayer Portal submission list, and code-level search inside
+other projects were not checked. The mechanism was chosen to differ
+from the known projects named in the brief — BallotSeal,
+CoreRelay, RecallScope, PatchDebt, GrantWeave, StepSpan,
+TermFence, and ErrataScope — in domain (OpenAPI interface
+compatibility, not voting, relaying, recalls, patch debt, grants,
+steps, terms, or errata), in mechanism (a deterministic OpenAPI
+diff that the LLM cannot override, plus a closed-kind semantic
+layer and change-type consensus equivalence), and in state
+machine (analyse → acknowledge → supersede). Before any
 submission, a reviewer must still run the full repository search
 listed in `DEPLOY.md` under "Pre-submission deduplication" and
 confirm no existing project covers this exact primitive.

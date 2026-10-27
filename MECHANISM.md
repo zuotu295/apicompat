@@ -42,13 +42,17 @@ contract extracts:
   even after the first JSON schema is found, so a warning from one
   response is never lost because another response had JSON;
 - non-2xx response summaries, for change detection only: for each
-  non-2xx status, its media types and its flattened JSON fields
-  (plus schema warnings) are recorded, but they are not diffed
-  field by field. The diff compares these summaries between old
-  and new and warns on any addition, removal, or change;
+  non-2xx status, its media types, its flattened JSON fields
+  (plus schema warnings), and its description are recorded, but
+  they are not diffed field by field. The diff compares these
+  summaries between old and new and warns on any addition,
+  removal, or change, including a description-only change;
 - the `deprecated` flag;
-- security scopes (root and operation level), used only for
-  semantic-field association;
+- effective security scopes: an operation-level security list
+  REPLACES the global list (OpenAPI override), so
+  `security: []` on an operation means anonymous, even when a
+  global list exists. Scopes are used for semantic-field
+  association and for the deterministic scope diff below;
 - an `unsupported` warning list for the operation, and a
   `context_text`: the canonical text of the operation, its
   path-level parameters, and every local component it references.
@@ -112,6 +116,8 @@ so the stored record is canonical.
 | Request body became required / optional | `request_body_required_added` / `request_body_required_removed` | breaking / info |
 | Parameter became non-nullable / nullable | `parameter_nullable_removed` / `parameter_nullable_added` | breaking / info |
 | Field became non-nullable / nullable | `request_field_nullable_removed` / `request_field_nullable_added`, `response_field_nullable_removed` / `response_field_nullable_added` | breaking / info |
+| Security scope added / removed | `security_scope_added` / `security_scope_removed` | breaking / info |
+| Enum values | `*_enum_shrunk` / `*_enum_expanded` | breaking / info, with float, int, string, and bool values distinguished by type (1, 1.0, and true are not collapsed) |
 
 ### Deterministic warning kinds for unsupported structures
 
@@ -212,11 +218,18 @@ A semantic finding is kept only if all of these hold:
    evidence mentions the claimed field (or a descendant of a
    claimed object field, or any field in a claimed section), it
    matches. If evidence mentions no parsed field at all, it
-   matches, so a generic semantic description is not rejected for
-   lacking a field name. If evidence mentions only other parsed
-   fields, it does not match and the finding is rejected. For
-   example, evidence that only describes the `admin` field cannot
-   support a finding about `response.id`;
+   matches ONLY if it mentions vocabulary for the claimed
+   semantic kind (for example pagination words for
+   `pagination_change`, or scope/security words for
+   `auth_scope_tightened`); a generic description about something
+   else entirely no longer passes merely by naming no field. If
+   evidence mentions only other parsed fields, it does not match
+   and the finding is rejected. For example, evidence that only
+   describes the `admin` field cannot support a finding about
+   `response.id`, and pagination prose cannot support an
+   `auth_scope_tightened` finding. Additionally, an
+   `auth_scope_tightened` finding's field must be a security
+   scope (or `security`), not an unrelated data field;
 7. it does not duplicate another kept semantic finding;
 8. it does not shadow a deterministic finding on the same
    operation/field/kind.
@@ -261,24 +274,41 @@ Validator logic:
    Malformed LLM output therefore forces rotation to a new leader
    instead of being agreed on as an error.
 2. Re-run the leader function independently.
-3. Require the same derived `status`, the same
-   `deterministic_count`, and the same `semantic_count`.
+3. Require the same derived `status` and the same
+   `deterministic_count`. There is no `semantic_count` equality:
+   the stored count is the leader's, and models may split one
+   change into different numbers of findings.
 4. Check that every semantic finding stored by the leader passes the
    same operation-anchored evidence check as in stage 3. A leader
    finding with unanchored evidence is rejected here even if its
-   decision key matches the validator's; this is defence in depth,
+   change type matches the validator's; this is defence in depth,
    since the leader's own validation already drops such findings
    before consensus.
-5. Require the same deterministic decision set and the same semantic
-   decision set, where a decision is
-   `(operation, field, kind, severity, source)`.
+5. Require the same deterministic decision set, where a decision is
+   `(operation, field, kind, severity, source)`, and the same
+   semantic change-type set, where a change type is
+   `(operation, kind, severity)` and every change type must also
+   share at least one field between leader and validator.
 
-Detail text and evidence wording are not required to be equal. The
-stored record keeps the leader's wording after consensus, provided
-that wording passed step 4. This is the documented
+Detail text, evidence wording, and semantic finding multiplicity
+are not required to be equal. The stored record keeps the leader's
+wording and field list after consensus, provided that wording
+passed step 4. This is the documented
 partial-field-matching pattern: compare the fields that decide the
 outcome, not the prose around them — with the added guard that the
 prose must still be anchored to the operation it claims to describe.
+
+This rule changed after a live Studionet run on 2026-10-27: the
+leader reported a pagination change as three findings (one per
+parameter) and the validator set disagreed 3-2, so the transaction
+finalised as MAJORITY_DISAGREE and nothing was stored. Exact
+field-list equality treated a legitimate per-field split as a
+different verdict. The group rule above still rejects a validator
+that finds no change, a different kind, a different severity, or
+a disjoint field set, so it is not agreement on wording alone;
+but field-level exactness of a stored semantic finding is not
+consensus-guaranteed, and reviewers should audit the stored field
+against the stored evidence.
 
 A validator that only checked the leader's JSON shape, enum, or a
 non-empty summary would not be consensus; this validator re-derives
@@ -322,7 +352,10 @@ allows for captured locals.
 - A case owner cannot rewrite findings: `acknowledge_breaking` only
   changes status and adds a migration note; `mark_superseded` only
   changes status and records a successor. Findings are immutable once
-  stored.
+  stored. `mark_superseded` additionally requires the successor to
+  be for the same `api_name` (no cross-API successor links) and
+  rejects any link that would close a successor cycle, by walking
+  the successor chain with a bound of case_count + 1.
 - The fingerprint is FNV-1a, not a cryptographic hash. It helps a
   reviewer spot that a spec changed; it does not prove authorship or
   prevent a determined party from crafting a colliding spec. Do not
@@ -330,8 +363,8 @@ allows for captured locals.
 - Real-model resistance to prompt injection (as opposed to the
   deterministic guarantees above) can only be shown on a live
   validator set and is therefore still open: the Studionet runs
-  on 2026-10-27 used live validators but produced semantic_count
-  0, so no live semantic finding was exercised there; see
+  on 2026-10-27 used live validators and stored live semantic
+  findings, but no live injection pair was run; see
   `DEPLOY.md` and `evidence/EVIDENCE.md`.
 
 ## Reuse guide for other builders
