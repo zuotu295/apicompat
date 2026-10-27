@@ -517,10 +517,13 @@ def test_leader_evidence_association_is_checked_by_validator_helper(mod):
         mod._parse_spec(old, "old"), mod._parse_spec(old, "new"))
     good = {"operation": "GET /users", "field": "response.items",
             "kind": "pagination_change", "severity": "breaking",
-            "evidence": "users", "source": "llm"}
-    # "users" is in the operation context (path /users) and the field
-    # token "items" is in the context, so this passes the association
+            "evidence": "items", "source": "llm"}
+    # "items" is the claimed field token and appears verbatim in
+    # the operation context, so this passes the association
     # check; it is not used as a stored finding in this test.
+    # (The previous evidence, "users", named no field and no
+    # pagination vocabulary, and no longer passes under the
+    # kind-bound generic-evidence rule.)
     assert mod._is_valid_semantic_finding(good, contexts) is True
     bad = {"operation": "GET /users", "field": "response.items",
            "kind": "pagination_change", "severity": "breaking",
@@ -847,7 +850,7 @@ def test_semantic_field_can_resolve_via_parameter_and_security(mod):
     old = _spec({"/users": {"get": {
         "parameters": [_param("limit", "query", False, "integer")],
         "security": [{"oauth": ["read:users"]}],
-        "description": "cursor-based pagination",
+        "description": "cursor-based pagination, requires read:users scope",
         "responses": {"200": {"description": "ok", "content": {
             "application/json": {"schema": _obj({"id": {"type": "integer"}})}}}}}}})
     data = mod._build_operation_data(
@@ -856,10 +859,17 @@ def test_semantic_field_can_resolve_via_parameter_and_security(mod):
                      "kind": "pagination_change", "severity": "warning",
                      "evidence": "cursor-based pagination"}
     assert mod._is_valid_semantic_finding(param_finding, data) is True
+    # Scope evidence must be about the scope, not about pagination:
+    # the old evidence ("cursor-based pagination") no longer
+    # supports an auth_scope_tightened finding, by design.
     scope_finding = {"operation": "GET /users", "field": "read:users",
                      "kind": "auth_scope_tightened", "severity": "warning",
-                     "evidence": "cursor-based pagination"}
+                     "evidence": "requires read:users scope"}
     assert mod._is_valid_semantic_finding(scope_finding, data) is True
+    scope_unrelated = {"operation": "GET /users", "field": "read:users",
+                       "kind": "auth_scope_tightened", "severity": "warning",
+                       "evidence": "cursor-based pagination"}
+    assert mod._is_valid_semantic_finding(scope_unrelated, data) is False
     missing_param = {"operation": "GET /users", "field": "param:query:missing",
                      "kind": "pagination_change", "severity": "warning",
                      "evidence": "cursor-based pagination"}
@@ -1284,3 +1294,291 @@ def test_gltest_config_uses_keys_accepted_by_genlayer_test():
     assert 'url: "https://studio.genlayer.com/api"' in text
     assert "id: 61999" in text
     assert "default: localnet" in text
+
+
+# ---------------------------------------------------------------------------
+# Final-round targeted fixes (2026-10-27): security override, superseded
+# constraints, semantic evidence-kind association, float enums, and
+# non-2xx descriptions. Each test below fails on the pre-fix contract.
+# ---------------------------------------------------------------------------
+
+
+def _spec_with_security(root_security, operation_security):
+    # Build a spec by hand because _op does not carry security.
+    op = {"responses": {"200": {"description": "ok", "content": {
+        "application/json": {"schema": _obj({"id": {"type": "integer"}})}}}}}
+    if operation_security is not None:
+        op["security"] = operation_security
+    doc = {"openapi": "3.0.3", "paths": {"/users": {"get": op}}}
+    if root_security is not None:
+        doc["security"] = root_security
+    return json.dumps(doc)
+
+
+def test_operation_security_empty_overrides_global_security(mod):
+    root = [{"oauth": ["admin"]}]
+    old = _spec_with_security(root, None)
+    new = _spec_with_security(root, [])
+    old_ops = mod._parse_spec(old, "old")
+    new_ops = mod._parse_spec(new, "new")
+    assert old_ops["GET /users"]["security_scopes"] == ["admin"]
+    # Previously the union of root + [] kept "admin" for the new
+    # operation; after the fix the operation is anonymous.
+    assert new_ops["GET /users"]["security_scopes"] == []
+
+
+def test_operation_security_replaces_global_security_not_union(mod):
+    old = _spec_with_security([{"oauth": ["admin"]}], None)
+    new = _spec_with_security([{"oauth": ["admin"]}], [{"oauth": ["read"]}])
+    new_ops = mod._parse_spec(new, "new")
+    assert new_ops["GET /users"]["security_scopes"] == ["read"]
+
+
+def test_security_scope_added_is_blocking_and_removed_is_info(env):
+    root = [{"oauth": ["admin"]}]
+    # Anonymous -> required scope: breaking.
+    contract = env.new()
+    old = _spec_with_security(root, [])
+    new = _spec_with_security(root, [{"oauth": ["admin"]}])
+    record = _analyze(env, contract, "case-scope-added", old, new)
+    assert record["status"] == "BLOCKED"
+    assert any(f["kind"] == "security_scope_added" and f["field"] == "admin"
+               for f in record["findings"])
+    # Required scope -> anonymous: info only, still COMPATIBLE.
+    contract2 = env.new()
+    record2 = _analyze(env, contract2, "case-scope-removed", new, old)
+    assert record2["status"] == "COMPATIBLE"
+    assert any(f["kind"] == "security_scope_removed" and f["field"] == "admin"
+               for f in record2["findings"])
+
+
+def test_mark_superseded_rejects_cycle(env):
+    contract = env.new()
+    spec = _spec({"/users": {"get": _op(response=_obj({"id": {"type": "integer"}}))}})
+    _analyze(env, contract, "case-a", spec, spec)
+    _analyze(env, contract, "case-b", spec, spec)
+    _analyze(env, contract, "case-c", spec, spec)
+    json.loads(contract.mark_superseded("case-a", "case-b"))
+    json.loads(contract.mark_superseded("case-b", "case-c"))
+    # C -> A would close A -> B -> C -> A.
+    with pytest.raises(Exception):
+        contract.mark_superseded("case-c", "case-a")
+    # Direct two-node cycle is likewise rejected.
+    contract2 = env.new()
+    _analyze(env, contract2, "case-x", spec, spec)
+    _analyze(env, contract2, "case-y", spec, spec)
+    json.loads(contract2.mark_superseded("case-x", "case-y"))
+    with pytest.raises(Exception):
+        contract2.mark_superseded("case-y", "case-x")
+
+
+def test_mark_superseded_rejects_cross_api_successor(env):
+    contract = env.new()
+    spec = _spec({"/users": {"get": _op(response=_obj({"id": {"type": "integer"}}))}})
+    _analyze(env, contract, "case-users", spec, spec, api="users-api")
+    _analyze(env, contract, "case-orders", spec, spec, api="orders-api")
+    with pytest.raises(Exception):
+        contract.mark_superseded("case-users", "case-orders")
+
+
+def test_semantic_auth_finding_requires_scope_field(mod):
+    old = _spec_with_security([{"oauth": ["admin"]}], None)
+    # Replace the operation description with a scope phrase by
+    # rebuilding the spec with an explicit description.
+    doc = json.loads(old)
+    doc["paths"]["/users"]["get"]["description"] = "requires admin scope"
+    old = json.dumps(doc)
+    data = mod._build_operation_data(
+        mod._parse_spec(old, "old"), mod._parse_spec(old, "new"))
+    # A parsed field that is not a scope cannot carry an auth kind.
+    wrong_field = {"operation": "GET /users", "field": "response.id",
+                   "kind": "auth_scope_tightened", "severity": "warning",
+                   "evidence": "requires admin scope"}
+    assert mod._is_valid_semantic_finding(wrong_field, data) is False
+    # The scope itself, with scope evidence, can.
+    right_field = {"operation": "GET /users", "field": "admin",
+                   "kind": "auth_scope_tightened", "severity": "warning",
+                   "evidence": "requires admin scope"}
+    assert mod._is_valid_semantic_finding(right_field, data) is True
+
+
+def test_semantic_generic_evidence_must_match_kind(mod):
+    old = _spec({"/users": {"get": _op(
+        response=_obj({"id": {"type": "integer"}, "items": {"type": "array", "items": {"type": "integer"}}}),
+        description="the weather is nice today")}})
+    data = mod._build_operation_data(
+        mod._parse_spec(old, "old"), mod._parse_spec(old, "new"))
+    # Evidence naming no field and no pagination vocabulary must
+    # not support a pagination finding, even though it is verbatim.
+    unrelated = {"operation": "GET /users", "field": "response.items",
+                 "kind": "pagination_change", "severity": "breaking",
+                 "evidence": "the weather is nice today"}
+    assert mod._is_valid_semantic_finding(unrelated, data) is False
+
+
+def test_float_enum_shrink_is_blocking(env):
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"score": {"type": "number", "enum": [0.5, 1.5, 2.5]}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"score": {"type": "number", "enum": [0.5, 1.5]}}))}})
+    record = _analyze(env, contract, "case-float-enum", old, new)
+    assert record["status"] == "BLOCKED"
+    assert any(f["kind"] == "response_field_enum_shrunk" and f["field"] == "score"
+               for f in record["findings"])
+
+
+def test_float_enum_int_float_distinction_is_not_collapsed(mod):
+    # 1 and 1.0 are distinct JSON values; a set-based enum diff
+    # that treats them as equal would miss the change entirely.
+    assert mod._enum_key(1) != mod._enum_key(1.0)
+    assert mod._enum_key(True) != mod._enum_key(1)
+    findings = []
+    mod._enum_diff([1], [1.0], "GET /items", "score", "response_field", findings)
+    # The sets are neither subset of the other, so no shrink/expand
+    # finding is emitted; the point is the values are not treated
+    # as identical, which a plain set() comparison would do.
+    assert findings == []
+    findings2 = []
+    mod._enum_diff([1.0, 2.0], [1.0], "GET /items", "score", "response_field", findings2)
+    assert any(f["kind"] == "response_field_enum_shrunk" for f in findings2)
+
+
+def test_non_2xx_description_only_change_is_review(env):
+    contract = env.new()
+    old_op = _op(response=_obj({"id": {"type": "integer"}}))
+    old_op["responses"]["404"] = {"description": "not found", "content": {
+        "application/json": {"schema": _obj({"error": {"type": "string"}})}}}
+    new_op = _op(response=_obj({"id": {"type": "integer"}}))
+    new_op["responses"]["404"] = {"description": "not found, please retry with a different id", "content": {
+        "application/json": {"schema": _obj({"error": {"type": "string"}})}}}
+    old = _spec({"/users": {"get": old_op}})
+    new = _spec({"/users": {"get": new_op}})
+    record = _analyze(env, contract, "case-non2xx-desc", old, new)
+    assert record["status"] == "REVIEW"
+    assert any(f["kind"] == "unsupported_non_2xx_response" for f in record["findings"])
+
+
+def test_validator_accepts_auth_scope_decision_with_different_evidence_wording(env):
+    contract = env.new()
+    # Same decision (same operation/field/kind/severity), different
+    # verbatim evidence wording: consensus is on the decision set,
+    # not on evidence wording.
+    old = _spec({"/users": {"get": {
+        "security": [{"oauth": ["read:users"]}],
+        "description": "requires read:users scope",
+        "responses": {"200": {"description": "ok", "content": {
+            "application/json": {"schema": _obj({"id": {"type": "integer"}})}}}}}}})
+    new = _spec({"/users": {"get": {
+        "security": [{"oauth": ["read:users"]}],
+        "description": "requires read:users scope, and admin approval is now also required",
+        "responses": {"200": {"description": "ok", "content": {
+            "application/json": {"schema": _obj({"id": {"type": "integer"}})}}}}}}})
+    env.queue_llm(
+        {"findings": [{"operation": "GET /users", "field": "read:users",
+                        "kind": "auth_scope_tightened", "severity": "warning",
+                        "evidence": "requires read:users scope"}]},
+        {"findings": [{"operation": "GET /users", "field": "read:users",
+                        "kind": "auth_scope_tightened", "severity": "warning",
+                        "evidence": "requires read:users scope, and admin approval"}]},
+    )
+    record = _analyze(env, contract, "case-auth-agree", old, new)
+    assert record["semantic_count"] == 1
+    assert record["findings"][-1]["evidence"] == "requires read:users scope"
+
+
+def test_validator_rejects_when_validator_finds_no_semantic_finding(env):
+    contract = env.new()
+    old = _spec({"/users": {"get": _op(
+        response=_obj({"id": {"type": "integer"}, "items": {"type": "array", "items": {"type": "integer"}}}),
+        description="cursor-based pagination")}})
+    new = _spec({"/users": {"get": _op(
+        response=_obj({"id": {"type": "integer"}, "items": {"type": "array", "items": {"type": "integer"}}}),
+        description="cursor-based pagination")}})
+    env.queue_llm(
+        {"findings": [{"operation": "GET /users", "field": "response.items",
+                        "kind": "pagination_change", "severity": "breaking",
+                        "evidence": "cursor-based pagination"}]},
+        {"findings": []},
+    )
+    with pytest.raises(Exception):
+        contract.analyze_case("case-semantic-disagree", "users-api", "1.0.0", "2.0.0", old, new)
+    assert contract.get_status("case-semantic-disagree") == "NOT_FOUND"
+    assert contract.get_case_count() == 0
+
+
+def _pagination_spec(description):
+    return _spec({"/users": {"get": _op(
+        parameters=[
+            {"name": "page", "in": "query", "required": False, "schema": {"type": "integer"}},
+            {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer"}},
+            {"name": "cursor", "in": "query", "required": False, "schema": {"type": "string"}},
+        ],
+        response=_obj({"items": {"type": "array", "items": {"type": "integer"}}}),
+        description=description)}})
+
+
+def test_validator_accepts_same_semantic_change_split_across_fields(env):
+    # Regression for the 2026-10-27 Studionet run: the leader
+    # reported one pagination finding per parameter, while a
+    # validator may report the same change once. Equivalence is on
+    # the change type with a shared field, not on equal counts or
+    # equal field lists, so this must agree and store the leader's
+    # three findings.
+    contract = env.new()
+    old = _pagination_spec("offset pagination with page and limit")
+    new = _pagination_spec("cursor pagination, use cursor, page and limit are ignored")
+    leader = [{"operation": "GET /users", "field": f"param:query:{name}",
+               "kind": "pagination_change", "severity": "breaking",
+               "evidence": "cursor pagination, use cursor, page and limit are ignored"}
+              for name in ("cursor", "limit", "page")]
+    env.queue_llm(
+        {"findings": leader},
+        {"findings": [{"operation": "GET /users", "field": "param:query:cursor",
+                        "kind": "pagination_change", "severity": "breaking",
+                        "evidence": "cursor pagination, use cursor, page and limit are ignored"}]},
+    )
+    record = _analyze(env, contract, "case-semantic-split", old, new)
+    assert record["semantic_count"] == 3
+    assert record["status"] == "BLOCKED"
+
+
+def test_validator_rejects_semantic_change_with_disjoint_fields(env):
+    # Same change type but no shared field: the validator located
+    # a different part of the change, so this must disagree and
+    # write nothing.
+    contract = env.new()
+    old = _pagination_spec("offset pagination with page and limit")
+    new = _pagination_spec("cursor pagination, page is ignored")
+    env.queue_llm(
+        {"findings": [{"operation": "GET /users", "field": "param:query:cursor",
+                        "kind": "pagination_change", "severity": "breaking",
+                        "evidence": "cursor pagination, page is ignored"}]},
+        {"findings": [{"operation": "GET /users", "field": "param:query:page",
+                        "kind": "pagination_change", "severity": "breaking",
+                        "evidence": "cursor pagination, page is ignored"}]},
+    )
+    with pytest.raises(Exception):
+        contract.analyze_case("case-semantic-disjoint", "users-api", "1.0.0", "2.0.0", old, new)
+    assert contract.get_status("case-semantic-disjoint") == "NOT_FOUND"
+    assert contract.get_case_count() == 0
+
+
+def test_validator_rejects_semantic_change_with_different_severity(env):
+    # Same operation and kind but a different severity is a
+    # different verdict, so this must disagree and write nothing.
+    contract = env.new()
+    old = _pagination_spec("offset pagination with page and limit")
+    new = _pagination_spec("cursor pagination with cursor")
+    env.queue_llm(
+        {"findings": [{"operation": "GET /users", "field": "param:query:cursor",
+                        "kind": "pagination_change", "severity": "breaking",
+                        "evidence": "cursor pagination with cursor"}]},
+        {"findings": [{"operation": "GET /users", "field": "param:query:cursor",
+                        "kind": "pagination_change", "severity": "warning",
+                        "evidence": "cursor pagination with cursor"}]},
+    )
+    with pytest.raises(Exception):
+        contract.analyze_case("case-semantic-severity", "users-api", "1.0.0", "2.0.0", old, new)
+    assert contract.get_status("case-semantic-severity") == "NOT_FOUND"
+    assert contract.get_case_count() == 0
