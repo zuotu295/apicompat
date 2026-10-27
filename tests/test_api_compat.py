@@ -1297,7 +1297,7 @@ def test_gltest_config_uses_keys_accepted_by_genlayer_test():
 
 
 # ---------------------------------------------------------------------------
-# Final-round targeted fixes (2026-10-27): security override, superseded
+# Security, supersede, and evidence rules: security override, supersede
 # constraints, semantic evidence-kind association, float enums, and
 # non-2xx descriptions.
 # ---------------------------------------------------------------------------

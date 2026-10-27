@@ -22,10 +22,9 @@ this file against a network other than studionet without
 reviewing it first, and do NOT use it for Appeal (the contract
 has no appeal path and this suite does not invoke one).
 
-The test prints a JSON evidence line per deployment/call so the
-agent can archive the contract address, transaction hashes,
-consensus status and execution result without relying on
-pytest's summary alone.
+The test prints a JSON evidence line per deployment/call recording
+the contract address, transaction hashes, consensus status and
+execution result, independent of pytest's summary.
 """
 
 import json

@@ -73,7 +73,8 @@ Scope and limits (see README.md and MECHANISM.md)
   it imports only ``json`` besides the GenLayer SDK, and all pure
   helpers are module-level so they can be unit-tested without a node.
 * No chain interaction, payment, or private key is involved in this
-  file. Deployment is a separate, later step (see DEPLOY.md).
+  file. Deployment is described in DEPLOY.md; recorded deployments
+  are listed in evidence/EVIDENCE.md.
 """
 
 from genlayer import *

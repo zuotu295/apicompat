@@ -2,9 +2,9 @@
 
 This script sends nothing, connects to nothing, and holds no key.
 It only prints the exact arguments that can be pasted into GenLayer
-Studio (or pass to the CLI / genlayer-js) after deploying the contract
-in a later step. See DEPLOY.md; deployment is explicitly out of scope
-for this development phase.
+Studio (or pass to the CLI / genlayer-js) after deploying the contract.
+See DEPLOY.md for the deployment guide and evidence/EVIDENCE.md for
+recorded deployments.
 
 Example outcome (local tests, mocked LLM returning no semantic
 findings): the bundled example pair is BLOCKED with 3 breaking and
