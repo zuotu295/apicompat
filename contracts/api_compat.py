@@ -28,14 +28,21 @@ Why this is not "AI decides X"
    finding can be audited against the operation it claims to describe.
    Spec text is treated as data, never as instructions.
 3. Validators do not trust the leader. A validator re-runs the same
-   leader function and compares the *decision sets* exactly: the sets
-   of (operation, field, kind, severity, source) for deterministic and
-   semantic findings, plus the derived status. Evidence wording is
-   deliberately not compared for equality, because wording varies
-   between models while the decision must not, but the validator does
-   check that every semantic finding stored by the leader has
-   operation-anchored evidence (see point 2); a finding whose evidence
-   fails that check is rejected even if its decision key matches.
+   leader function and compares decisions: deterministic findings
+   exactly, as sets of (operation, field, kind, severity, source),
+   plus the derived status; semantic findings by change type, as
+   sets of (operation, kind, severity) where every change type must
+   also share at least one field between leader and validator.
+   Evidence wording and finding multiplicity are deliberately not
+   compared for equality, because wording and per-field splitting
+   vary between models while the change type must not, but the
+   validator does check that every semantic finding stored by the
+   leader has operation-anchored evidence (see point 2); a finding
+   whose evidence fails that check is rejected even if its change
+   type matches. Field-level exactness of a stored semantic finding
+   is therefore not consensus-guaranteed; the stored field is
+   auditable against the evidence, but validators agree on the
+   change type, not on the exact field list.
 4. State only moves after consensus, in deterministic code:
    ANALYSED (COMPATIBLE / REVIEW / BLOCKED) -> ACKNOWLEDGED (owner
    only, BLOCKED only, with a migration note) -> SUPERSEDED (owner
@@ -151,8 +158,25 @@ def _validate_text_field(value, label, max_chars):
 def _schema_enum(schema):
     enum_value = schema.get("enum")
     if isinstance(enum_value, list):
-        return [item for item in enum_value if isinstance(item, (str, int, bool))]
+        # Floats are real enum values too: dropping them (as a
+        # str/int/bool-only filter did) made every float-enum change
+        # invisible, including float-enum shrink.
+        return [item for item in enum_value if isinstance(item, (str, int, float, bool))]
     return []
+
+
+def _enum_key(item):
+    # JSON 1, 1.0, and true are distinct values, but Python sets
+    # treat them as equal (1 == 1.0 == True, same hash). Key enum
+    # values by type as well as value so a change between them is
+    # not silently collapsed, and normalise -0.0 to 0.0.
+    if isinstance(item, bool):
+        return ("bool", item)
+    if isinstance(item, int):
+        return ("int", item)
+    if isinstance(item, float):
+        return ("float", 0.0 if item == 0.0 else item)
+    return ("str", item)
 
 
 def _flatten_schema(schema, prefix, is_required, out, depth, components, seen_refs, warnings=None, section=""):
@@ -542,6 +566,7 @@ def _parse_spec(spec_text, label):
                     "non_2xx_fields": {},
                     "non_2xx_media": {},
                     "non_2xx_warnings": {},
+                    "non_2xx_descriptions": {},
                     "deprecated": False,
                     "request_required": False,
                     "has_request_body": False,
@@ -708,13 +733,18 @@ def _parse_spec(spec_text, label):
                     }
                 )
             # Non-2xx responses are not diffed field by field, but
-            # their presence, media types, and JSON schemas are
-            # recorded, so the deterministic diff can warn when a
-            # non-2xx response changes. Unchanged non-2xx responses
-            # produce no warning; a changed one forces REVIEW.
+            # their presence, media types, JSON schemas, and
+            # descriptions are recorded, so the deterministic diff
+            # can warn when a non-2xx response changes. Unchanged
+            # non-2xx responses produce no warning; a changed one
+            # forces REVIEW. The description is recorded separately
+            # because a description-only change (for example a 404
+            # message changing meaning) previously left fields,
+            # media, and warnings all unchanged and was undetected.
             non_2xx_fields = {}
             non_2xx_media = {}
             non_2xx_warnings = {}
+            non_2xx_descriptions = {}
             if isinstance(responses, dict):
                 for status in sorted(responses.keys()):
                     if status.startswith("2"):
@@ -731,6 +761,7 @@ def _parse_spec(spec_text, label):
                         non_2xx_fields[status] = {}
                         non_2xx_media[status] = []
                         non_2xx_warnings[status] = []
+                        non_2xx_descriptions[status] = ""
                         continue
                     entry = _resolve_reference_entry(
                         entry_raw, components, unsupported, "unsupported_response_ref", "response"
@@ -739,7 +770,12 @@ def _parse_spec(spec_text, label):
                         non_2xx_fields[status] = {}
                         non_2xx_media[status] = []
                         non_2xx_warnings[status] = []
+                        non_2xx_descriptions[status] = ""
                         continue
+                    description = entry.get("description")
+                    if not isinstance(description, str):
+                        description = ""
+                    non_2xx_descriptions[status] = description
                     content = entry.get("content")
                     if not isinstance(content, dict) or len(content) == 0:
                         non_2xx_fields[status] = {}
@@ -772,13 +808,27 @@ def _parse_spec(spec_text, label):
                 parts = ref.split("/")
                 if len(parts) > 0 and parts[-1] not in component_names:
                     component_names.append(parts[-1])
+            # OpenAPI security override: an operation-level
+            # security list REPLACES the global list, it does not
+            # merge with it. In particular security: [] on an
+            # operation makes that operation anonymous, even when
+            # a global security list exists. The previous code
+            # unioned both lists, so an operation that had been
+            # made anonymous still appeared to require the global
+            # scopes, and a scope that had been dropped at the
+            # operation level still appeared to be required.
+            # The scope set is a simplification: requirement
+            # structure (AND within an entry, OR across entries,
+            # and the {} anonymous alternative) is not modelled,
+            # only which scopes are named.
             security_scopes = []
-            security_sources = []
-            if isinstance(root_security, list):
-                security_sources.append(root_security)
             operation_security = operation.get("security")
             if isinstance(operation_security, list):
-                security_sources.append(operation_security)
+                security_sources = [operation_security]
+            elif isinstance(root_security, list):
+                security_sources = [root_security]
+            else:
+                security_sources = []
             for security_list in security_sources:
                 for security_entry in security_list:
                     if isinstance(security_entry, dict):
@@ -802,6 +852,7 @@ def _parse_spec(spec_text, label):
                 "non_2xx_fields": non_2xx_fields,
                 "non_2xx_media": non_2xx_media,
                 "non_2xx_warnings": non_2xx_warnings,
+                "non_2xx_descriptions": non_2xx_descriptions,
                 "deprecated": operation.get("deprecated") is True,
                 "request_required": request_required,
                 "has_request_body": request_body_raw is not None,
@@ -849,8 +900,8 @@ def _add_finding(findings, operation, field, kind, severity, detail, evidence=""
 def _enum_diff(old_enum, new_enum, operation, field, kind_prefix, findings):
     if len(old_enum) == 0 or len(new_enum) == 0:
         return
-    old_set = set(old_enum)
-    new_set = set(new_enum)
+    old_set = set(_enum_key(item) for item in old_enum)
+    new_set = set(_enum_key(item) for item in new_enum)
     if new_set < old_set:
         _add_finding(findings, operation, field, kind_prefix + "_enum_shrunk", "breaking", "Allowed values were removed.")
     elif old_set < new_set:
@@ -888,6 +939,8 @@ def _deterministic_diff(old_ops, new_ops):
         new_non_media = new_op.get("non_2xx_media", {})
         old_non_warnings = old_op.get("non_2xx_warnings", {})
         new_non_warnings = new_op.get("non_2xx_warnings", {})
+        old_non_descriptions = old_op.get("non_2xx_descriptions", {})
+        new_non_descriptions = new_op.get("non_2xx_descriptions", {})
         for status in sorted(old_non.keys()):
             if status not in new_non:
                 _add_finding(findings, operation, "response", "unsupported_non_2xx_response", "warning", "Non-2xx response " + status + " was removed but is not diffed field by field.")
@@ -897,8 +950,19 @@ def _deterministic_diff(old_ops, new_ops):
         for status in sorted(old_non.keys()):
             if status not in new_non:
                 continue
-            if old_non[status] != new_non[status] or old_non_media.get(status) != new_non_media.get(status) or old_non_warnings.get(status) != new_non_warnings.get(status):
+            if old_non[status] != new_non[status] or old_non_media.get(status) != new_non_media.get(status) or old_non_warnings.get(status) != new_non_warnings.get(status) or old_non_descriptions.get(status, "") != new_non_descriptions.get(status, ""):
                 _add_finding(findings, operation, "response", "unsupported_non_2xx_response", "warning", "Non-2xx response " + status + " changed but is not diffed field by field.")
+        # Effective security scopes (see _parse_spec for the
+        # override rule). A newly required scope breaks existing
+        # clients that lack it; a dropped scope only loosens
+        # access, so it is info, not breaking. This is a scope
+        # set diff, not a full requirement-structure diff.
+        old_scopes = set(old_op.get("security_scopes", []))
+        new_scopes = set(new_op.get("security_scopes", []))
+        for scope in sorted(new_scopes - old_scopes):
+            _add_finding(findings, operation, scope, "security_scope_added", "breaking", "Security scope " + scope + " became required.")
+        for scope in sorted(old_scopes - new_scopes):
+            _add_finding(findings, operation, scope, "security_scope_removed", "info", "Security scope " + scope + " is no longer required.")
         old_params = old_op["parameters"]
         new_params = new_op["parameters"]
         for field in sorted(old_params.keys()):
@@ -1183,18 +1247,35 @@ def _claimed_tokens(field, data):
     return claimed
 
 
-def _evidence_matches_field(field, data, evidence_norm):
+SEMANTIC_KIND_WORDS = {
+    "semantic_rename": ("rename", "renamed", "renaming", "name", "alias"),
+    "format_or_unit_change": ("format", "unit", "currency", "decimal", "precision", "second", "millisecond", "date", "time"),
+    "pagination_change": ("pagination", "page", "cursor", "offset", "limit", "per_page", "page_size", "next_page", "paging"),
+    "error_semantics_change": ("error", "code", "status", "exception", "failure", "fault"),
+    "default_change": ("default",),
+    "auth_scope_tightened": ("scope", "security", "auth", "authorization", "oauth", "permission", "role", "token", "credential", "access"),
+    "ordering_change": ("order", "ordering", "sorted", "sort", "sequence"),
+    "deprecation_timeline": ("deprecat", "sunset", "removal", "removed", "end of life", "timeline"),
+    "rate_limit_change": ("rate", "throttle", "quota", "burst", "requests per"),
+    "idempotency_change": ("idempot", "duplicate", "retry", "safe"),
+}
+
+
+def _evidence_matches_field(field, data, evidence_norm, kind=None):
     """Check that evidence is about the claimed field, not only another field.
 
     Operation-level association is not enough: evidence that only
     describes a different parsed field must not support a finding
-    about this field. The rule is deliberately narrow:
+    about this field. The rule is:
     - if evidence mentions the claimed field (or a descendant of a
       claimed object field, or any field in a claimed section),
       it matches;
-    - if evidence mentions no parsed field at all, it matches, so a
-      generic semantic description (for example pagination behaviour)
-      is not rejected for lacking a field name;
+    - if evidence mentions no parsed field at all, it matches ONLY
+      if it mentions vocabulary for the claimed semantic kind
+      (for example pagination words for pagination_change, or
+      scope/security words for auth_scope_tightened). A generic
+      description about something else entirely no longer passes
+      merely because it names no field;
     - if evidence mentions only other parsed fields, it does not
       match, and the finding is rejected.
     Field mentions are matched as whole words, not substrings, so
@@ -1226,7 +1307,18 @@ def _evidence_matches_field(field, data, evidence_norm):
     if len(claimed & mentioned) > 0:
         return True
     if len(mentioned) == 0:
-        return True
+        # No parsed field is mentioned: accept only kind-bound
+        # generic evidence, so an unrelated description cannot
+        # support a finding just by naming no field. When no kind
+        # is supplied (direct helper calls without a kind), keep
+        # the previous lenient behaviour for backward
+        # compatibility; the contract path always supplies a kind.
+        if kind is None:
+            return True
+        for word in SEMANTIC_KIND_WORDS.get(kind, ()):
+            if word in evidence_norm:
+                return True
+        return False
     return False
 
 
@@ -1265,7 +1357,17 @@ def _is_valid_semantic_finding(item, operation_data):
         return False
     if not _field_is_associated(field, data):
         return False
-    return _evidence_matches_field(field, data, evidence_norm)
+    # Kind-field type check for auth scopes: an
+    # auth_scope_tightened finding must actually be about a
+    # security scope (or the security section), not about an
+    # unrelated parsed field that happens to exist. Other kinds
+    # are not restricted this way, because their natural field
+    # (for example a paginated response list for
+    # pagination_change) is not a distinct parsed entity.
+    if kind == "auth_scope_tightened":
+        if field != "security" and field not in data["security_scopes"]:
+            return False
+    return _evidence_matches_field(field, data, evidence_norm, kind)
 
 
 def _status_from_findings(findings):
@@ -1314,10 +1416,48 @@ def _decision_sets(findings):
     return deterministic, semantic
 
 
+def _semantic_groups(findings):
+    """Group semantic findings by change type, collecting their fields.
+
+    One semantic change can legitimately be reported once or once
+    per affected field by different models (for example a pagination
+    change reported for cursor, or for cursor, page, and limit).
+    The change type is the verdict; the field is a locator.
+    """
+    groups = {}
+    for finding in findings:
+        if finding["source"] != "llm":
+            continue
+        key = (finding["operation"], finding["kind"], finding["severity"])
+        groups.setdefault(key, set()).add(finding["field"])
+    return groups
+
+
+def _semantic_groups_equivalent(left_findings, right_findings):
+    """Semantic equivalence: same change types, with a shared field.
+
+    Two runs agree on semantics when they report exactly the same
+    set of (operation, kind, severity) change types, and for every
+    change type their field sets intersect (at least one common
+    locator). A run that finds no semantic change, a different kind,
+    or a different severity still disagrees, and a run whose fields
+    are disjoint from the leader's also disagrees. Multiplicity
+    alone (one finding vs several for the same change) is not a
+    disagreement.
+    """
+    left_groups = _semantic_groups(left_findings)
+    right_groups = _semantic_groups(right_findings)
+    if set(left_groups) != set(right_groups):
+        return False
+    return all(left_groups[key] & right_groups[key] for key in left_groups)
+
+
 def _decision_sets_equal(left_findings, right_findings):
-    left_det, left_sem = _decision_sets(left_findings)
-    right_det, right_sem = _decision_sets(right_findings)
-    return left_det == right_det and left_sem == right_sem
+    left_det, _ = _decision_sets(left_findings)
+    right_det, _ = _decision_sets(right_findings)
+    return left_det == right_det and _semantic_groups_equivalent(
+        left_findings, right_findings
+    )
 
 
 def _parse_llm_result(raw):
@@ -1528,7 +1668,18 @@ def _build_prompt(deterministic_findings, old_spec, new_spec):
         "The operation must exist in one of the specifications. The evidence must be "
         "a verbatim excerpt from that same operation (including any component it "
         "references), not a paraphrase and not text from another operation. The "
-        "field must name something that appears in that same operation. "
+        "field must name something that appears in that same operation, using "
+        "exactly one of these forms: a response field as response.<field>, a "
+        "request field as request.<field>, a parameter as param:<in>:<name>, or "
+        "a security scope name exactly as it appears in a security list. For "
+        "auth_scope_tightened the field must be a scope name, not a data "
+        "field. Report each distinct semantic change exactly once: if one "
+        "change affects several parameters or fields, pick the single field "
+        "most central to the change and do not emit one finding per "
+        "affected field. If a change is described only in prose (for example in a "
+        "description), quote that prose verbatim as the evidence; do not "
+        "invent a field name that does not appear in the specification, and "
+        "do not quote prose from a different operation. "
         "If there are no semantic findings, return {\"findings\": []}.\n"
         "<old_spec>\n" + _truncate(_sanitize_prompt_text(old_spec), MAX_PROMPT_SPEC_CHARS) + "\n</old_spec>\n"
         "<new_spec>\n" + _truncate(_sanitize_prompt_text(new_spec), MAX_PROMPT_SPEC_CHARS) + "\n</new_spec>"
@@ -1614,8 +1765,11 @@ class ApiCompat(gl.Contract):
                 return False
             if leader_data.get("deterministic_count") != own_data.get("deterministic_count"):
                 return False
-            if leader_data.get("semantic_count") != own_data.get("semantic_count"):
-                return False
+            # No semantic_count equality: the stored count is the
+            # leader's, and models may split one change into
+            # different numbers of findings. Agreement on semantics
+            # is checked by _decision_sets_equal (change types plus
+            # a shared field), not by equal counts.
             leader_findings = leader_data.get("findings")
             own_findings = own_data.get("findings")
             if not isinstance(leader_findings, list) or not isinstance(own_findings, list):
@@ -1714,6 +1868,35 @@ class ApiCompat(gl.Contract):
             raise gl.vm.UserError("NOT_OWNER: only the case owner can supersede")
         if record["status"] not in ("COMPATIBLE", "REVIEW", "ACKNOWLEDGED"):
             raise gl.vm.UserError("INVALID_STATUS: BLOCKED cases must be acknowledged first")
+        successor_text = self.cases.get(successor_case_id, "")
+        successor_record = json.loads(successor_text)
+        # A successor must be a later analysis of the SAME API:
+        # pointing a users-api case at an orders-api case would
+        # merge two unrelated version histories.
+        if successor_record.get("api_name") != record.get("api_name"):
+            raise gl.vm.UserError("INVALID_INPUT: successor case is for a different API")
+        # Cycle check: walk the successor chain from the proposed
+        # successor. If the walk reaches this case, accepting the
+        # link would create a cycle (A -> B -> A, or longer).
+        # The walk is bounded by the case count plus one, so a
+        # pre-existing cycle cannot loop forever.
+        seen = set()
+        current = successor_case_id
+        bound = int(self.case_count) + 1
+        steps = 0
+        while current != "" and steps <= bound:
+            if current == case_id:
+                raise gl.vm.UserError("INVALID_INPUT: successor chain would create a cycle")
+            if current in seen:
+                raise gl.vm.UserError("INVALID_INPUT: successor chain contains a cycle")
+            seen.add(current)
+            next_text = self.cases.get(current, "")
+            if next_text == "":
+                break
+            current = json.loads(next_text).get("successor_case_id", "")
+            steps += 1
+        if steps > bound:
+            raise gl.vm.UserError("INVALID_INPUT: successor chain is too long to verify")
         record["status"] = "SUPERSEDED"
         record["successor_case_id"] = successor_case_id
         updated = _canonical(record)
