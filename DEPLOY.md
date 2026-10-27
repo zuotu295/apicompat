@@ -76,12 +76,15 @@ Do not reuse the stable `studionet` preset for Studio-dev
    was not printed, so it is marked not captured in the evidence
    file and was not reconstructed; a rerun with the analyze
    receipt captured supplies the complete pair for that case.
-4. **Real-model semantic checks.** Run several representative pairs
-   (pagination change, auth-scope tightening, error-code change,
-   rename with changed meaning) against the live validator set and
-   confirm that semantic findings appear, that paraphrased evidence
-   is still dropped, and that a spec containing injected
-   instructions does not change the deterministic outcome.
+4. **Real-model semantic checks.** Done in part on 2026-10-27:
+   pagination and auth-scope cases each stored one live semantic
+   breaking finding (see `evidence/studionet_semantic_2026-10-27.json`);
+   the error-code case stored REVIEW via the deterministic warning
+   with no agreed semantic finding, and paraphrased-evidence
+   dropping plus injection resistance of the deterministic layer
+   are covered by the stand-in suite, not by a live run. A future
+   live run could still test rename-with-changed-meaning and a
+   live injection pair.
 5. **Fee check.** If the deployment charges fees, generate a fee
    profile from representative branches and use the SDK estimate
    (distribution + fee value) unchanged; do not hand-build fee
@@ -91,10 +94,13 @@ Do not reuse the stable `studionet` preset for Studio-dev
    presenting a case as settled, and note that an appeal can still
    overturn a decision inside its window.
 
-## Pre-submission deduplication (required, not done here)
+## Pre-submission deduplication (public-repo check done 2026-10-27; full search still required)
 
-This candidate was developed without connecting to GitHub or any
-other repository. Before submitting this candidate anywhere, run a
+A public-repo check was run on 2026-10-27 (zuotu295 public
+repositories, halihalibt public repositories, web search for
+GenLayer OpenAPI compatibility contracts) and found no
+core-mechanism duplicate; see README.md for scope and limits.
+Before submitting this candidate anywhere, still run a
 full search over the relevant GenLayer builder repositories and
 submission lists for:
 
