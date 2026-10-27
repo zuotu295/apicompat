@@ -1,6 +1,7 @@
 .venv/
 .venv-repro/
 .venv-clean/
+.venv-clean2/
 artifacts/
 __pycache__/
 .pytest_cache/

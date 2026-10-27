@@ -151,16 +151,18 @@ python3 -m venv .venv-repro
 # genlayer-test 0.29.2, genlayer-py 0.16.3, genvm-linter 0.11.0,
 # pytest 9.1.1, Python 3.12.3
 .venv-repro/bin/python -m pytest tests -q
-# 74 passed
+# 96 passed
 .venv-repro/bin/genvm-lint check contracts/api_compat.py
 # Lint passed (3 checks), Validation passed, 6 methods
 ```
 
 The full pinned list is in `requirements.lock.txt`. It was
 verified by installing it into a clean virtual environment
-(`.venv-clean`) and re-running the suite there: 74 passed, lint
-passed. Neither `.venv-repro` nor `.venv-clean` is shipped in the
-zip.
+(`.venv-clean2`) and re-running the suite there: 98 passed
+(96 stand-in + 2 direct-mode), lint passed. Neither
+`.venv-repro` nor `.venv-clean2` is shipped in the
+zip. (At first delivery the same check reported 74 passed;
+that was the then-current suite size, not a different result.)
 
 ### Direct-mode smoke tests (real GenVM, in-process)
 
@@ -351,7 +353,7 @@ Limits:
 ```
 contracts/api_compat.py      # single-file GenLayer contract (deployable)
 tests/conftest.py            # GenLayer stand-in + contract loader
-tests/test_api_compat.py     # 89 tests with real assertions
+tests/test_api_compat.py     # 96 tests with real assertions
 tests_direct/test_direct_smoke.py  # 2 direct-mode tests, real GenVM
 examples/old_spec.json       # bundled v1 example
 examples/new_spec.json       # bundled v2 example (BLOCKED pair)
@@ -389,3 +391,49 @@ machine (analyse → acknowledge → supersede). Before any
 submission, a reviewer must still run the full repository search
 listed in `DEPLOY.md` under "Pre-submission deduplication" and
 confirm no existing project covers this exact primitive.
+
+### Difference from a Protocol Consumer Compatibility Attestation
+
+This note is written from the concept as named, because no
+project by that exact name was located in memory, in the public
+repositories checked above, or in a web search on 2026-10-27.
+It therefore does not claim to describe any particular
+implementation's code; if a reviewer means a specific
+implementation, that repository must be named and this comparison
+re-checked against its code. The conceptual difference is still
+sharp, and it is the point an originality reviewer is most likely
+to confuse:
+
+- **Different subject.** An attestation answers, for a specific
+  consumer, "does this protocol (or version) meet this
+  consumer's requirements?" Its subject is a consumer +
+  protocol pair, and its verdict is about that consumer. ApiCompat
+  answers, for a producer's API, "is version N+1 compatible with
+  version N for consumers in general?" Its subject is two versions
+  of one OpenAPI document, and it takes no consumer identity and
+  no consumer-registered requirements as input at all.
+- **Different verdict meaning.** `BLOCKED` here means "do not
+  release this API version without acknowledging the break"; it
+  is not a statement that a particular consumer is or is not
+  compatible, and `COMPATIBLE` here is not an attestation that any
+  named consumer's requirements are met. A BLOCKED or COMPATIBLE
+  verdict could be *used as input* to an attestation, but it is
+  not itself one.
+- **Different authority.** ApiCompat's verdict is driven by a
+  deterministic spec-to-spec diff that the LLM cannot override,
+  plus a bounded semantic layer. An attestation's authority comes
+  from evidencing a claim about a consumer's requirements, which
+  ApiCompat never collects, so the two cannot be the same
+  mechanism with different labels.
+- **Different lifecycle.** ApiCompat's state machine is
+  analyse → acknowledge (BLOCKED only, owner, migration note) →
+  supersede (to an existing successor case for the same API):
+  a version chain. An attestation lifecycle is about issuing,
+  relying on, and expiring a claim for a consumer, which ApiCompat
+  has no concept of: it stores no consumer, no attestation, and
+  no expiry.
+
+In short: ApiCompat judges a spec change; an attestation judges a
+consumer's fit to a protocol. Similar words ("compatibility",
+"consumer"), different question, different inputs, different
+verdict, different state.

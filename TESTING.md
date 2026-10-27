@@ -2,7 +2,7 @@
 
 ## Layers
 
-1. **Stand-in suite — `tests/` (89 passed).** Loads
+1. **Stand-in suite — `tests/` (96 passed).** Loads
    `contracts/api_compat.py` itself behind a small GenLayer
    stand-in (`tests/conftest.py`), so it exercises the deployable
    file, not a copy of its logic. Covers the deterministic diff,
@@ -24,7 +24,13 @@
    fields agrees; disjoint fields disagree; different severity
    disagrees). The split-agreement test fails against the
    pre-equivalence contract; the other new tests fail against
-   their respective pre-fix contracts. Run:
+   their respective pre-fix contracts. The enum round adds:
+   unrestricted → finite (breaking), finite → unrestricted
+   (info only), disjoint replacement (breaking + info), mixed
+   add-and-remove (breaking + info), pure expansion (info only),
+   parameter restriction (breaking), and identical/no-enum
+   (no finding). The `1` → `1.0` disjoint case, which previously
+   expected no findings, now expects breaking + info. Run:
    `.venv-repro/bin/python -m pytest tests -q`.
    A test count is a result, not a proof of correctness.
 2. **Direct-mode smoke — `tests_direct/` (2 passed, real GenVM
@@ -58,6 +64,12 @@
      An earlier same-day run finalised as MAJORITY_DISAGREE
      and stored nothing, which motivated the revised semantic
      equivalence rule (change-type groups with a shared field).
+   - `test_studionet_enum.py`: 1 passed in 88.00s, post-enum-fix
+     contract only. A disjoint enum replacement stored BLOCKED
+     with both `response_field_enum_shrunk` (breaking) and
+     `response_field_enum_expanded` (info); the pre-fix contract
+     stored nothing for this case. See
+     `evidence/studionet_enum_2026-10-27.json`.
 
 ## Linter
 

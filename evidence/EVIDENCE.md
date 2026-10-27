@@ -1,10 +1,13 @@
 # Evidence — Stable Studionet, 2026-10-27 (Beijing time)
 
-Machine-readable evidence: `studionet_deployment_2026-10-27.json`
-and `studionet_semantic_2026-10-27.json` in
+Machine-readable evidence: `studionet_deployment_2026-10-27.json`,
+`studionet_semantic_2026-10-27.json`, and
+`studionet_enum_2026-10-27.json` in
 this directory. This file is a human-readable summary of the same
 runs; it adds no address, hash, or result beyond what the test
-output printed.
+output printed. Sections 1–4 describe the cd79117-era contract;
+section 5 describes the post-enum-fix contract — keep the
+versions separate.
 
 ## Network
 
@@ -121,6 +124,42 @@ contract after the test and match the values below.
   The second run above uses the revised contract. The change still
   rejects a validator that finds no change, a different kind, a
   different severity, or a disjoint field set; see MECHANISM.md.
+
+## 5. Enum-fix verification — disjoint replacement now BLOCKED (2026-10-27, post-fix contract)
+
+Machine-readable: `studionet_enum_2026-10-27.json`.
+Test: `tests_integration/test_studionet_enum.py`, 1 passed in
+88.00s. One contract instance, one case, owner (gltest
+auto-generated test account, not a personal wallet)
+`0x3f2F05dB388dCA2c9FeBbF531F1B6f06a2623E6e`, case count 1.
+The record was read back independently from the contract after
+the test and matches the values below.
+
+- Contract: `0x3DEEE3252fc812D533F8Ad1d41579794A90f24fC`
+- Deploy tx: `0xff74c6a50a6f748359e2d0f43c2d07cb69d69072a9c953f5cfcc5a7e1fc9f97a`
+  (FINALIZED)
+- Case `studionet-enum-disjoint`: analyze tx
+  `0x0252796ce26c5a471e0013250ef3f4eff458265e4b16372aeb2219b7e21543b3`
+  (FINALIZED, execution succeeded) → **BLOCKED, deterministic 2,
+  semantic 0, breaking 1, info 1**. Findings: response field
+  `state`, `response_field_enum_shrunk` (breaking, values
+  removed) and `response_field_enum_expanded` (info, values
+  added), for the replacement `["open", "closed"]` →
+  `["active", "archived"]` with no surviving value.
+- Why this instance exists: the pre-fix contract produced no
+  finding at all for this case, so a new deployment was the
+  minimal proof that the fix works on chain. Only one deploy and
+  one case were used; no earlier successful transaction was
+  repeated.
+- Prior instances are unaffected in their stored verdicts: the
+  bundled example specs contain no enums, and neither do any
+  earlier integration-test specs, so no stored verdict would
+  change under the fixed code. Those instances still run the
+  pre-fix code for any *future* case, which is why this new
+  instance, not an old address, is the evidence for the enum fix.
+  Do not mix version conclusions across instances: this section
+  is the post-enum-fix contract; sections 1–4 are the
+  cd79117-era contract.
 
 ## What this does and does not prove
 

@@ -118,6 +118,18 @@ so the stored record is canonical.
 | Field became non-nullable / nullable | `request_field_nullable_removed` / `request_field_nullable_added`, `response_field_nullable_removed` / `response_field_nullable_added` | breaking / info |
 | Security scope added / removed | `security_scope_added` / `security_scope_removed` | breaking / info |
 | Enum values | `*_enum_shrunk` / `*_enum_expanded` | breaking / info, with float, int, string, and bool values distinguished by type (1, 1.0, and true are not collapsed) |
+| Enum restriction added (no enum → finite enum) | `*_enum_shrunk` | breaking: values that used to be allowed are now rejected |
+| Enum restriction removed (finite enum → no enum) | `*_enum_expanded` | info: previously rejected values are now allowed |
+| Enum mixed replacement (values both removed and added, including a fully disjoint set) | `*_enum_shrunk` + `*_enum_expanded` | breaking (drives the status) + info; never silently passed |
+
+Enum handling distinguishes "no enum" (unrestricted, stored as
+`None`) from an explicitly set enum list. The previous version
+collapsed both to an empty list and only handled strict
+subset/superset, so a first restriction, a disjoint replacement,
+and a mixed add-and-remove all passed silently; the 2026-10-27
+enum fix and its regression tests cover all three, and the
+`1` → `1.0` test that previously expected no findings was
+updated because that disjoint replacement is now breaking.
 
 ### Deterministic warning kinds for unsupported structures
 

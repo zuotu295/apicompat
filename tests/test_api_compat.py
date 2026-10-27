@@ -1435,10 +1435,15 @@ def test_float_enum_int_float_distinction_is_not_collapsed(mod):
     assert mod._enum_key(True) != mod._enum_key(1)
     findings = []
     mod._enum_diff([1], [1.0], "GET /items", "score", "response_field", findings)
-    # The sets are neither subset of the other, so no shrink/expand
-    # finding is emitted; the point is the values are not treated
-    # as identical, which a plain set() comparison would do.
-    assert findings == []
+    # The sets are disjoint (int 1 vs float 1.0 are distinct JSON
+    # values), so this is a replacement, not a silent pass: the
+    # removed value is breaking and the added value is info.
+    # This assertion previously expected no findings, which encoded
+    # the disjoint-replacement bug; it was updated with the fix.
+    assert any(f["kind"] == "response_field_enum_shrunk" and f["severity"] == "breaking"
+               for f in findings)
+    assert any(f["kind"] == "response_field_enum_expanded" and f["severity"] == "info"
+               for f in findings)
     findings2 = []
     mod._enum_diff([1.0, 2.0], [1.0], "GET /items", "score", "response_field", findings2)
     assert any(f["kind"] == "response_field_enum_shrunk" for f in findings2)
@@ -1582,3 +1587,106 @@ def test_validator_rejects_semantic_change_with_different_severity(env):
         contract.analyze_case("case-semantic-severity", "users-api", "1.0.0", "2.0.0", old, new)
     assert contract.get_status("case-semantic-severity") == "NOT_FOUND"
     assert contract.get_case_count() == 0
+
+
+def test_enum_unrestricted_to_finite_is_blocking(env):
+    # Adding a first restriction: previously any value was allowed,
+    # now only the listed values are. That is breaking, and the old
+    # code missed it entirely (either side empty -> return).
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string"}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open", "closed"]}}))}})
+    record = _analyze(env, contract, "case-enum-restrict", old, new)
+    assert record["status"] == "BLOCKED"
+    assert any(f["kind"] == "response_field_enum_shrunk" and f["field"] == "state"
+               for f in record["findings"])
+
+
+def test_enum_finite_to_unrestricted_is_info_only(env):
+    # Removing the restriction: previously rejected values are now
+    # allowed, so nothing breaks.
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open", "closed"]}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string"}}))}})
+    record = _analyze(env, contract, "case-enum-unrestrict", old, new)
+    assert record["status"] == "COMPATIBLE"
+    assert any(f["kind"] == "response_field_enum_expanded" and f["field"] == "state"
+               for f in record["findings"])
+    assert not any(f["severity"] == "breaking" for f in record["findings"])
+
+
+def test_enum_disjoint_replacement_is_blocking(env):
+    # No value survives the replacement; this must not pass
+    # silently, which is what the old subset-only diff did.
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open", "closed"]}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["active", "archived"]}}))}})
+    record = _analyze(env, contract, "case-enum-disjoint", old, new)
+    assert record["status"] == "BLOCKED"
+    assert any(f["kind"] == "response_field_enum_shrunk" for f in record["findings"])
+    assert any(f["kind"] == "response_field_enum_expanded" for f in record["findings"])
+
+
+def test_enum_mixed_add_remove_is_blocking(env):
+    # Partial overlap: one value removed, one added. The removal
+    # breaks clients even though the set also grew.
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open", "closed"]}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open", "archived"]}}))}})
+    record = _analyze(env, contract, "case-enum-mixed", old, new)
+    assert record["status"] == "BLOCKED"
+    assert any(f["kind"] == "response_field_enum_shrunk" for f in record["findings"])
+    assert any(f["kind"] == "response_field_enum_expanded" for f in record["findings"])
+
+
+def test_enum_pure_expansion_is_info_only(env):
+    # Unchanged behaviour for the case the old code already handled.
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open"]}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string", "enum": ["open", "closed"]}}))}})
+    record = _analyze(env, contract, "case-enum-expand", old, new)
+    assert record["status"] == "COMPATIBLE"
+    assert any(f["kind"] == "response_field_enum_expanded" for f in record["findings"])
+    assert not any(f["severity"] == "breaking" for f in record["findings"])
+
+
+def test_enum_parameter_unrestricted_to_finite_is_blocking(env):
+    # Same restriction rule, on a query parameter rather than a
+    # response field.
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(
+        parameters=[{"name": "state", "in": "query", "required": False,
+                     "schema": {"type": "string"}}],
+        response=_obj({"id": {"type": "integer"}}))}})
+    new = _spec({"/items": {"get": _op(
+        parameters=[{"name": "state", "in": "query", "required": False,
+                     "schema": {"type": "string", "enum": ["open", "closed"]}}],
+        response=_obj({"id": {"type": "integer"}}))}})
+    record = _analyze(env, contract, "case-enum-param", old, new)
+    assert record["status"] == "BLOCKED"
+    assert any(f["kind"] == "parameter_enum_shrunk" for f in record["findings"])
+
+
+def test_enum_unchanged_and_no_enum_both_silent(env):
+    # No enum on either side, and identical enums, must still
+    # produce no enum finding at all.
+    contract = env.new()
+    old = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string"},
+         "mode": {"type": "string", "enum": ["a", "b"]}}))}})
+    new = _spec({"/items": {"get": _op(response=_obj(
+        {"state": {"type": "string"},
+         "mode": {"type": "string", "enum": ["a", "b"]}}))}})
+    record = _analyze(env, contract, "case-enum-same", old, new)
+    assert record["status"] == "COMPATIBLE"
+    assert not any("enum" in f["kind"] for f in record["findings"])

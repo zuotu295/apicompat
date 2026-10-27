@@ -156,13 +156,18 @@ def _validate_text_field(value, label, max_chars):
 
 
 def _schema_enum(schema):
+    # Returns None when the schema sets no enum (unrestricted), and
+    # the explicit value list otherwise. The distinction matters:
+    # collapsing both to [] made "no restriction" and "an empty
+    # restriction" indistinguishable, so adding a first restriction
+    # (unrestricted -> finite enum) was silently missed.
     enum_value = schema.get("enum")
     if isinstance(enum_value, list):
         # Floats are real enum values too: dropping them (as a
         # str/int/bool-only filter did) made every float-enum change
         # invisible, including float-enum shrink.
         return [item for item in enum_value if isinstance(item, (str, int, float, bool))]
-    return []
+    return None
 
 
 def _enum_key(item):
@@ -207,7 +212,7 @@ def _flatten_schema(schema, prefix, is_required, out, depth, components, seen_re
                     "detail": "In " + section + " schema: external reference is not resolved: " + ref + ".",
                 }
             )
-            out[prefix] = {"type": "ref:unknown", "format": "", "required": is_required, "enum": [], "nullable": False}
+            out[prefix] = {"type": "ref:unknown", "format": "", "required": is_required, "enum": None, "nullable": False}
             return
         name = ref[len(marker):]
         if name in seen_refs:
@@ -218,7 +223,7 @@ def _flatten_schema(schema, prefix, is_required, out, depth, components, seen_re
                     "detail": "In " + section + " schema: reference cycle at " + name + " is not expanded further.",
                 }
             )
-            out[prefix] = {"type": "ref:" + name, "format": "", "required": is_required, "enum": [], "nullable": False}
+            out[prefix] = {"type": "ref:" + name, "format": "", "required": is_required, "enum": None, "nullable": False}
             return
         target = components.get(name)
         if not isinstance(target, dict):
@@ -229,7 +234,7 @@ def _flatten_schema(schema, prefix, is_required, out, depth, components, seen_re
                     "detail": "In " + section + " schema: referenced component is missing: " + name + ".",
                 }
             )
-            out[prefix] = {"type": "ref:" + name, "format": "", "required": is_required, "enum": [], "nullable": False}
+            out[prefix] = {"type": "ref:" + name, "format": "", "required": is_required, "enum": None, "nullable": False}
             return
         _flatten_schema(target, prefix, is_required, out, depth + 1, components, seen_refs + [name], warnings, section)
         return
@@ -898,14 +903,38 @@ def _add_finding(findings, operation, field, kind, severity, detail, evidence=""
 
 
 def _enum_diff(old_enum, new_enum, operation, field, kind_prefix, findings):
-    if len(old_enum) == 0 or len(new_enum) == 0:
+    # old_enum / new_enum are None (no enum restriction) or an
+    # explicit value list. Every change in the allowed set must
+    # produce a finding; the previous version returned early when
+    # either side was empty and only handled strict subset /
+    # superset, so three cases passed silently: unrestricted ->
+    # finite enum, a disjoint replacement, and a mixed
+    # add-and-remove. Values are compared by _enum_key, so int,
+    # float, and bool values stay distinct.
+    if old_enum is None and new_enum is None:
+        return
+    if old_enum is None:
+        # A first restriction was added: values that used to be
+        # allowed are now rejected, so this is breaking.
+        _add_finding(findings, operation, field, kind_prefix + "_enum_shrunk", "breaking", "Allowed values were restricted (previously unrestricted).")
+        return
+    if new_enum is None:
+        # The restriction was removed: previously rejected values
+        # are now allowed, so this is purely additive.
+        _add_finding(findings, operation, field, kind_prefix + "_enum_expanded", "info", "Allowed values are no longer restricted.")
         return
     old_set = set(_enum_key(item) for item in old_enum)
     new_set = set(_enum_key(item) for item in new_enum)
-    if new_set < old_set:
+    removed = old_set - new_set
+    added = new_set - old_set
+    if removed:
         _add_finding(findings, operation, field, kind_prefix + "_enum_shrunk", "breaking", "Allowed values were removed.")
-    elif old_set < new_set:
+    if added:
         _add_finding(findings, operation, field, kind_prefix + "_enum_expanded", "info", "Allowed values were added.")
+    # Note: when both removed and added are non-empty (a mixed
+    # replacement, including a fully disjoint set), both findings
+    # are emitted and the breaking one drives the status, so the
+    # replacement can never pass silently.
 
 
 def _deterministic_diff(old_ops, new_ops):
